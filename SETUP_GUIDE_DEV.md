@@ -28,6 +28,18 @@ Tài liệu này dành cho các lập trình viên (Developer) muốn chạy Bac
    > **💡 Lưu ý cho máy Mac chip M (ARM64):**
    > Image của `sqlserver` hiện tại chỉ hỗ trợ kiến trúc `linux/amd64`. Tuy nhiên, file compose đã được cấu hình `platform: linux/amd64` nên Docker trên Mac sẽ tự động giả lập và chạy SQL Server bình thường.
 
+### 2.1. Cài đặt Playwright (Bắt buộc cho Dev)
+
+Worker sử dụng thư viện **Playwright** để giả lập trình duyệt chấm điểm UI. Chạy các lệnh sau:
+
+```bash
+cd GradingSystem.Worker
+dotnet tool install --global Microsoft.Playwright.CLI
+playwright install chromium
+```
+
+> **⚠️ Lưu ý cho Mac/Linux:** Nếu báo lỗi `command not found: playwright`, hãy dùng đường dẫn tuyệt đối: `~/.dotnet/tools/playwright install chromium`
+
 ## 3. Khởi chạy Backend (API & Worker)
 
 Sau khi hạ tầng Docker đã chạy, bạn khởi động API và Worker bằng lệnh `dotnet run` (mở mỗi cái ở một Terminal riêng):
@@ -35,7 +47,7 @@ Sau khi hạ tầng Docker đã chạy, bạn khởi động API và Worker bằ
 ### 3.1. Chạy API
 
 ```bash
-cd be/GradingSystem.Api
+cd GradingSystem.Api
 dotnet run
 ```
 
@@ -45,25 +57,13 @@ dotnet run
 ### 3.2. Chạy Worker (Xử lý chấm điểm)
 
 ```bash
-cd be/GradingSystem.Worker
+cd GradingSystem.Worker
 dotnet run
 ```
 
 - Worker sẽ lắng nghe các job chấm điểm từ RabbitMQ.
 
-## 4. Khởi chạy Frontend (Next.js)
-
-Mở một Terminal mới để chạy Frontend:
-
-```bash
-cd fe
-npm install
-npm run dev
-```
-
-- Giao diện Web: `http://localhost:3000`
-
-## 5. Quản lý Hạ tầng Dev
+## 4. Quản lý Hạ tầng Dev
 
 - Nếu muốn xem **PGWeb** (Giao diện web để quản lý Database Postgres), bạn chạy lệnh kèm profile `tools`:
 
