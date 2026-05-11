@@ -1,4 +1,4 @@
-# PRN232 Auto Grader - Server (Backend)
+# PRN232 Auto Grader
 
 Hệ thống chấm thi tự động cho môn PRN232 (lập trình ASP.NET). Hỗ trợ 2 dạng câu hỏi: **Q1** (SQL/Stored Procedures) và **Q2** (ASP.NET Razor API). Chấm bài theo luồng bất đồng bộ qua RabbitMQ.
 
@@ -8,7 +8,12 @@ Hệ thống chấm thi tự động cho môn PRN232 (lập trình ASP.NET). H�
 
 - [Tổng quan kiến trúc](#tổng-quan-kiến-trúc)
 - [Tech Stack](#tech-stack)
+- [Yêu cầu hệ thống](#yêu-cầu-hệ-thống)
 - [Cài đặt & Chạy](#cài-đặt--chạy)
+  - [Chế độ Development](#chế-độ-development)
+  - [Chế độ Production](#chế-độ-production)
+- [Cấu trúc thư mục](#cấu-trúc-thư-mục)
+- [Các luồng chính của hệ thống](#các-luồng-chính-của-hệ-thống)
 - [API Endpoints](#api-endpoints)
 - [Biến môi trường](#biến-môi-trường)
 
@@ -16,60 +21,377 @@ Hệ thống chấm thi tự động cho môn PRN232 (lập trình ASP.NET). H�
 
 ## Tổng quan kiến trúc
 
-Backend được xây dựng dựa trên Clean Architecture, bao gồm:
+```
+┌──────────────────────────────────────────────────────────────┐
+│                        Frontend                              │
+│                   Next.js 16 (port 3000)                     │
+│              REST API calls (/api/v1/...)                    │
+└───────────────────────────┬──────────────────────────────────┘
+                            │ HTTP/REST
+┌───────────────────────────▼──────────────────────────────────┐
+│                      Backend API                             │
+│               ASP.NET Core 8 (port 5049/8080)                │
+│           Clean Architecture: Domain → App → Infra → API     │
+└───────────┬──────────────────────────┬───────────────────────┘
+            │ EF Core                  │ MassTransit / AMQP
+            │                          │
+┌───────────▼──────────┐  ┌────────────▼───────────────────────┐
+│     PostgreSQL 16    │  │           RabbitMQ 3               │
+│  (dữ liệu chính)     │  │    (hàng đợi job chấm thi)         │
+└──────────────────────┘  └────────────┬───────────────────────┘
+                                        │ consume
+┌───────────────────────────────────────▼───────────────────────┐
+│                        Worker Service                         │
+│            .NET 8 Background Worker (GradingPipeline)         │
+│   Chạy artifact → test cases → lưu kết quả → dọn dẹp         │
+└───────────┬───────────────────────────────────────────────────┘
+            │ kết nối tạm (Q1)
+┌───────────▼──────────┐
+│     SQL Server 2022  │
+│  (chạy Q1 database   │
+│   của sinh viên)     │
+└──────────────────────┘
+```
 
-- **GradingSystem.Api**: REST API xử lý request từ Frontend.
-- **GradingSystem.Worker**: Background Worker xử lý việc chấm thi bất đồng bộ qua RabbitMQ.
-- **GradingSystem.Application**: Chứa business logic, DTOs, interfaces.
-- **GradingSystem.Domain**: Chứa các Entity cốt lõi.
-- **GradingSystem.Infrastructure**: Kết nối DB (PostgreSQL, SQL Server), Message Broker.
+---
 
 ## Tech Stack
 
-| Thành phần         | Công nghệ                                    |
-| ------------------ | -------------------------------------------- |
-| Backend API        | ASP.NET Core 8, EF Core 8, API Versioning    |
-| Worker             | .NET 8 Background Service, MassTransit 8.3.6 |
-| Message Broker     | RabbitMQ 3                                   |
-| Database chính     | PostgreSQL 16                                |
-| Database sinh viên | SQL Server 2022 (Q1)                         |
+| Thành phần         | Công nghệ                                              |
+| ------------------ | ------------------------------------------------------ |
+| Frontend           | Next.js 16.2.3, React 19, TypeScript 5, Tailwind CSS 4 |
+| Backend API        | ASP.NET Core 8, EF Core 8, API Versioning              |
+| Worker             | .NET 8 Background Service, MassTransit 8.3.6           |
+| Message Broker     | RabbitMQ 3                                             |
+| Database chính     | PostgreSQL 16                                          |
+| Database sinh viên | SQL Server 2022 (Q1)                                   |
+| Storage            | Local filesystem `/storage`                            |
+| Container          | Docker & Docker Compose                                |
+| Browser Automation | Microsoft.Playwright 1.52                              |
+| Excel Export       | EPPlus 7                                               |
+
+---
+
+## Yêu cầu hệ thống
+
+- **Docker Desktop** >= 24.x
+- **Docker Compose** >= 2.x
+- **.NET SDK 8.0** (nếu chạy không dùng Docker)
+- **Node.js >= 18** (nếu chạy frontend không dùng Docker)
+- RAM tối thiểu: **4 GB** (khuyến nghị 8 GB)
+- Disk: **10 GB** trống
+
+---
 
 ## Cài đặt & Chạy
 
-Yêu cầu: Docker Desktop, .NET 8 SDK.
+### Bước 1 — Cấu hình biến môi trường
 
-1. **Copy cấu hình môi trường:**
+```bash
+cp .env.example .env
+```
 
-   ```bash
-   cp .env.example .env
-   ```
+Chỉnh sửa `.env` theo môi trường của bạn (xem phần [Biến môi trường](#biến-môi-trường)).
 
-2. **Khởi động Infrastructure (DB, RabbitMQ):**
+---
 
-   ```bash
-   docker compose -f docker-compose.dev.yml up -d
-   ```
+### Chế độ Development
 
-3. **Chạy Backend API:**
+Trong chế độ dev, chỉ chạy **infrastructure** bằng Docker. API, Worker và Frontend chạy trực tiếp trên máy.
 
-   ```bash
-   cd GradingSystem.Api
-   dotnet run
-   ```
+**Bước 1 — Khởi động infrastructure:**
 
-4. **Chạy Worker (Chấm bài):**
-   ```bash
-   cd GradingSystem.Worker
-   dotnet run
-   ```
+```bash
+docker compose -f docker-compose.dev.yml up -d
+```
+
+Các service sẽ khởi động:
+| Service | Port | Ghi chú |
+|---------|------|---------|
+| PostgreSQL 16 | 5432 | DB chính |
+| SQL Server 2022 | 1433 | DB Q1 sinh viên |
+| RabbitMQ | 5672 (AMQP), 15672 (UI) | Message broker |
+| pgWeb (tùy chọn) | 8081 | Xem DB trực quan |
+
+RabbitMQ Management UI: http://localhost:15672 (guest/guest)
+
+**Bước 2 — Chạy Backend API:**
+
+```bash
+cd be/GradingSystem.Api
+dotnet run
+# API chạy tại http://localhost:5049
+# Swagger UI: http://localhost:5049/swagger
+```
+
+**Bước 3 — Chạy Worker:**
+
+```bash
+cd be/GradingSystem.Worker
+dotnet run
+```
+
+**Bước 4 — Chạy Frontend:**
+
+```bash
+cd fe/grading-system
+npm install
+npm run dev
+# Frontend chạy tại http://localhost:3000
+```
+
+**Bước 5 — Migrate database (lần đầu):**
+
+```bash
+cd be/GradingSystem.Api
+dotnet ef database update
+```
+
+---
+
+### Chế độ Production
+
+Chạy toàn bộ stack bằng Docker Compose:
+
+```bash
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+| Service     | Port  | URL                           |
+| ----------- | ----- | ----------------------------- |
+| Frontend    | 3000  | http://localhost:3000         |
+| API         | 8080  | http://localhost:8080/swagger |
+| RabbitMQ UI | 15672 | http://localhost:15672        |
+| pgWeb       | 8081  | http://localhost:8081         |
+
+Dừng toàn bộ:
+
+```bash
+docker compose -f docker-compose.prod.yml down
+```
+
+---
+
+## Cấu trúc thư mục
+
+```
+Project/
+├── be/                                  # Backend (.NET 8)
+│   ├── GradingSystem.Api/               # ASP.NET Core Web API
+│   │   ├── Controllers/                 # 9 controllers (Assignment, Submission, ...)
+│   │   ├── appsettings.json             # Cấu hình DB, RabbitMQ
+│   │   └── Program.cs                   # Startup / DI
+│   ├── GradingSystem.Worker/            # Background worker service
+│   │   └── Services/
+│   │       ├── GradingPipeline.cs       # Pipeline chấm thi chính
+│   │       ├── ArtifactRunner.cs        # Chạy artifact sinh viên
+│   │       └── TestRunner.cs            # Gọi HTTP test cases
+│   ├── GradingSystem.Application/       # Business logic, DTOs, interfaces
+│   ├── GradingSystem.Domain/            # Entities (Assignment, Submission, ...)
+│   └── GradingSystem.Infrastructure/   # EF Core, migrations, DB context
+│
+├── fe/grading-system/                   # Frontend (Next.js)
+│   ├── app/                             # Next.js App Router pages
+│   │   ├── assignments/                 # Quản lý đề thi
+│   │   ├── exam-sessions/               # Kỳ thi
+│   │   ├── submissions/                 # Bài nộp
+│   │   ├── exports/                     # Xuất kết quả
+│   │   └── grading/                     # Dashboard chấm thi
+│   └── components/                      # UI components dùng chung
+│
+├── supports/
+│   └── given/givenAPI/                  # API mẫu dùng làm reference cho Q2
+│
+├── docs/                                # Tài liệu bổ sung
+├── docker-compose.dev.yml               # Dev infrastructure only
+├── docker-compose.prod.yml              # Full production stack
+├── .env.example                         # Template biến môi trường
+└── DEPLOY_EC2_MANUAL.md                 # Hướng dẫn deploy lên AWS EC2
+```
+
+---
+
+## Các luồng chính của hệ thống
+
+### Luồng 1 — Tạo đề thi & câu hỏi
+
+```
+Giảng viên
+  │
+  ├─► Tạo Assignment (mã đề, tiêu đề)
+  │
+  ├─► Upload resources:
+  │     • Q1: file database.sql (tạo DB mẫu trên SQL Server)
+  │     • Q2: URL API mẫu đã chạy (GivenApiBaseUrl)
+  │
+  ├─► Tạo Questions (loại Api/Razor, điểm tối đa)
+  │
+  └─► Tạo TestCases cho từng Question
+        • HTTP method, URL template
+        • Input JSON (body/params)
+        • Expected JSON (status code, response body, isArray)
+        • Điểm của test case này
+```
+
+### Luồng 2 — Nộp bài & chấm thi
+
+```
+Giảng viên
+  │
+  ├─► Import danh sách sinh viên (CSV)
+  │
+  ├─► Upload master.zip (chứa tất cả bài nộp)
+  │     Cấu trúc zip: {studentCode}/{artifact}/
+  │
+  ├─► Trigger Grade → API tạo GradingJob → publish GradeJobMessage lên RabbitMQ
+  │
+  └─► Worker nhận message:
+        1. Load job từ PostgreSQL
+        2. Lock assignment (tránh race condition SQL Server)
+        3. Mark job = Running
+        4. ArtifactRunner: extract zip, chạy API artifact của SV
+        5. TestRunner: gọi từng test case HTTP, so sánh response với expected
+        6. Lưu QuestionResult (điểm, chi tiết từng test case)
+        7. Mark job = Done / Failed
+        8. Cleanup: xóa artifact zip, dừng process
+```
+
+### Luồng 3 — Xem kết quả & điều chỉnh điểm
+
+```
+Giảng viên
+  │
+  ├─► Xem danh sách Submissions của Assignment
+  │
+  ├─► Xem chi tiết Submission → QuestionResults
+  │     • Điểm tự động (Score)
+  │     • Chi tiết từng test case (pass/fail, response nhận được)
+  │
+  ├─► Điều chỉnh điểm thủ công nếu cần (AdjustedScore + lý do)
+  │
+  └─► Thêm ReviewNote cho sinh viên
+```
+
+### Luồng 4 — Xuất kết quả Excel
+
+```
+Giảng viên
+  │
+  ├─► Tạo ExportJob (theo Assignment hoặc ExamSession)
+  │     • Lọc theo GradingRound (tùy chọn)
+  │
+  ├─► Worker xử lý ExportJob async
+  │     • Tổng hợp điểm từ QuestionResults
+  │     • Dùng EPPlus tạo file .xlsx (multi-sheet cho session)
+  │
+  └─► Download file Excel khi ExportJob = Done
+```
+
+### Luồng 5 — Quản lý kỳ thi (ExamSession)
+
+```
+Giảng viên
+  │
+  ├─► Tạo ExamSession (nhóm nhiều Assignment)
+  │
+  ├─► Gán Assignments vào session
+  │
+  ├─► Xem kết quả tổng hợp toàn kỳ thi
+  │     • Điểm từng Assignment của từng sinh viên
+  │
+  └─► Xuất Excel toàn kỳ (multi-sheet, 1 sheet/assignment)
+```
+
+---
+
+## API Endpoints
+
+Base URL: `http://localhost:5049/api/v1`  
+Swagger UI: `http://localhost:5049/swagger`
+
+| Controller      | Method | Path                                    | Mô tả                |
+| --------------- | ------ | --------------------------------------- | -------------------- |
+| Assignments     | POST   | `/assignments`                          | Tạo đề thi           |
+|                 | GET    | `/assignments`                          | Danh sách đề thi     |
+|                 | GET    | `/assignments/{id}`                     | Chi tiết đề thi      |
+|                 | PUT    | `/assignments/{id}/resources`           | Upload SQL + API URL |
+|                 | POST   | `/assignments/{id}/participants/import` | Import sinh viên CSV |
+|                 | POST   | `/assignments/{id}/bulk-upload`         | Upload master.zip    |
+|                 | POST   | `/assignments/{id}/grade`               | Kích hoạt chấm thi   |
+|                 | DELETE | `/assignments/{id}`                     | Xóa đề thi           |
+| Questions       | POST   | `/assignments/{id}/questions`           | Tạo câu hỏi          |
+|                 | GET    | `/assignments/{id}/questions`           | Danh sách câu hỏi    |
+|                 | DELETE | `/questions/{questionId}`               | Xóa câu hỏi          |
+| TestCases       | POST   | `/questions/{id}/test-cases`            | Tạo test cases       |
+|                 | GET    | `/questions/{id}/test-cases`            | Danh sách test cases |
+|                 | PUT    | `/test-cases/{id}`                      | Cập nhật test case   |
+|                 | DELETE | `/test-cases/{id}`                      | Xóa test case        |
+| Submissions     | GET    | `/assignments/{id}/submissions`         | Danh sách bài nộp    |
+|                 | GET    | `/submissions/{id}`                     | Chi tiết bài nộp     |
+|                 | GET    | `/submissions/{id}/results`             | Kết quả chấm         |
+|                 | PUT    | `/submissions/{id}/notes`               | Thêm/sửa ghi chú     |
+| GradingJobs     | GET    | `/grading-jobs/{id}`                    | Trạng thái job       |
+|                 | GET    | `/submissions/{id}/grading-jobs`        | Jobs của bài nộp     |
+| QuestionResults | GET    | `/question-results/{id}`                | Chi tiết kết quả     |
+|                 | PUT    | `/question-results/{id}/adjust`         | Điều chỉnh điểm      |
+|                 | DELETE | `/question-results/{id}/adjust`         | Xóa điều chỉnh       |
+| ExamSessions    | POST   | `/exam-sessions`                        | Tạo kỳ thi           |
+|                 | GET    | `/exam-sessions`                        | Danh sách kỳ thi     |
+|                 | GET    | `/exam-sessions/{id}/results`           | Kết quả kỳ thi       |
+|                 | POST   | `/exam-sessions/{id}/exports`           | Xuất Excel kỳ thi    |
+| Exports         | POST   | `/exports`                              | Tạo export job       |
+|                 | GET    | `/exports/{id}`                         | Trạng thái export    |
+|                 | GET    | `/exports/{id}/download`                | Download file Excel  |
+
+---
 
 ## Biến môi trường
 
-Xem `.env.example` để biết cấu hình chi tiết cho PostgreSQL, SQL Server, và RabbitMQ.
+Xem file `.env.example` để biết đầy đủ các biến. Các biến quan trọng:
 
-<!--
-1. Test structure
-2. Test case Q2
-3. Cleanup worker
-4. Lần chấm bài
--->
+```env
+# PostgreSQL
+POSTGRES_DB=grading_system
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=grading_pass
+
+# SQL Server (Q1 grading)
+SA_PASSWORD=YourStrong@Passw0rd
+
+# RabbitMQ
+RABBITMQ_DEFAULT_USER=grading
+RABBITMQ_DEFAULT_PASS=grading_pass
+
+# API
+ASPNETCORE_ENVIRONMENT=Development
+STORAGE_PATH=/storage
+
+# Frontend
+NEXT_PUBLIC_API_URL=http://localhost:5049
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+```
+
+---
+
+## Storage Layout
+
+```
+/storage/
+├── assignments/{AssignmentId}/
+│   ├── database.sql          # Template DB cho Q1
+│   └── given.zip             # Source API mẫu cho Q2
+├── submissions/{SubmissionId}/
+│   └── artifact.zip          # Bài nộp (tự động xóa sau chấm)
+└── exports/{ExportJobId}/
+    └── results_{timestamp}.xlsx
+```
+
+---
+
+## Ghi chú phát triển
+
+- **API versioning**: Hỗ trợ v1.0 và v2.0. Mặc định dùng `v1`.
+- **Request size limit**: API chấp nhận request tối đa **200 MB** (cho bulk upload).
+- **Concurrent grading**: Worker giới hạn **3 job đồng thời** (configurable).
+- **Score logic**: `FinalScore = AdjustedScore ?? AutoScore` — điểm thủ công ưu tiên hơn điểm tự động.
+- **Q1 isolation**: Mỗi bài Q1 tạo một database tạm trên SQL Server, xóa sau khi chấm xong.
