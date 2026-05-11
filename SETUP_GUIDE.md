@@ -1,14 +1,13 @@
 # Hướng dẫn Cài đặt & Chạy ứng dụng bằng Docker
 
-Tài liệu này hướng dẫn cách chạy hệ thống Auto Grader chỉ với Docker mà không cần tải mã nguồn về.
+Tài liệu này hướng dẫn cách chạy hệ thống Backend Auto Grader chỉ với Docker mà không cần tải mã nguồn về.
 
 ## 1. Các Images cần Pull
 
-Hệ thống được đóng gói thành 3 images chính trên Docker Hub (thay `your-dockerhub-username` bằng username thực tế của bạn):
+Hệ thống được đóng gói thành 2 images chính trên Docker Hub (thay `your-dockerhub-username` bằng username thực tế của bạn):
 
 1. **API**: `ngothanhdatak/grading-system-api:latest`
 2. **Worker**: `ngothanhdatak/grading-system-worker:latest`
-3. **Frontend**: `ngothanhdatak/grading-system-fe:latest`
 
 _(Ngoài ra hệ thống còn dùng thêm các images phụ trợ có sẵn: `postgres:16-alpine`, `mcr.microsoft.com/mssql/server:2022-latest`, `rabbitmq:3-management-alpine`, `sosedoff/pgweb`)_
 
@@ -38,7 +37,6 @@ Lệnh này sẽ tự động tải tất cả các images cần thiết về v�
 
 Sau khi lệnh trên chạy xong, bạn có thể truy cập ngay vào hệ thống qua trình duyệt:
 
-- **Giao diện Web (Frontend)**: `http://localhost:3000`
 - **Tài liệu API (Swagger)**: `http://localhost:5049/swagger`
 - **Quản lý RabbitMQ**: `http://localhost:15672` (Dùng tài khoản đã đặt trong `.env`)
 - **Quản trị DB Postgres (PGWeb)**: `http://localhost:8081`

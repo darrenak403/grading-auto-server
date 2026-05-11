@@ -1,12 +1,11 @@
 # Hướng dẫn Cài đặt & Chạy ứng dụng cho Developer (Môi trường Dev)
 
-Tài liệu này dành cho các lập trình viên (Developer) muốn chạy dự án ở môi trường Local để code, debug và test.
+Tài liệu này dành cho các lập trình viên (Developer) muốn chạy Backend ở môi trường Local để code, debug và test.
 
 ## 1. Yêu cầu hệ thống
 
 - **Docker Desktop** (để chạy DB).
 - **.NET 8 SDK** (để chạy Backend API và Worker).
-- **Node.js (phiên bản 20 hoặc 22)** (để chạy Frontend).
 - IDE khuyên dùng: Visual Studio 2022, JetBrains Rider, hoặc VS Code.
 
 ## 2. Khởi chạy Hạ tầng (Databases & RabbitMQ)
@@ -32,27 +31,11 @@ Tài liệu này dành cho các lập trình viên (Developer) muốn chạy d�
 
 1. Mở file `Project.sln` bằng Visual Studio hoặc Rider.
 2. Thiết lập dự án `GradingSystem.Api` làm **Startup Project** và chạy (nhấn F5 hoặc nút Play).
-3. (Tùy chọn) Nếu bạn đang phát triển phần xử lý background job, bạn cũng có thể mở Terminal mới, trỏ vào thư mục `be/GradingSystem.Worker` và chạy `dotnet run`.
+3. (Tùy chọn) Nếu bạn đang phát triển phần xử lý background job, bạn cũng có thể mở Terminal mới, trỏ vào thư mục `GradingSystem.Worker` và chạy `dotnet run`.
 4. API sẽ chạy ở địa chỉ mặc định: `http://localhost:5049` (hoặc cổng được set trong `launchSettings.json`).
 5. Vào `http://localhost:5049/swagger` để xem tài liệu API.
 
-## 4. Khởi chạy Frontend (Next.js)
-
-1. Mở Terminal mới, di chuyển vào thư mục Frontend:
-   ```bash
-   cd fe/grading-system
-   ```
-2. Cài đặt các gói thư viện (nếu là lần đầu tiên):
-   ```bash
-   npm install
-   ```
-3. Chạy môi trường phát triển:
-   ```bash
-   npm run dev
-   ```
-4. Mở trình duyệt và truy cập: `http://localhost:3000`
-
-## 5. Quản lý Hạ tầng Dev
+## 4. Quản lý Hạ tầng Dev
 
 - Nếu muốn xem **PGWeb** (Giao diện web để quản lý Database Postgres), bạn chạy lệnh kèm profile `tools`:
 
