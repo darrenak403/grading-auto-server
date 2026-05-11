@@ -1,16 +1,4 @@
 services:
-  fe:
-    image: ${DOCKER_REPO}/grading-system-fe:${IMAGE_TAG}
-
-    depends_on:
-      api:
-        condition: service_started
-    ports:
-      - '${FE_PORT:-3000}:3000'
-    networks:
-      - grading_net
-    restart: unless-stopped
-
   api:
     image: ${DOCKER_REPO}/grading-system-api:${IMAGE_TAG}
     depends_on:
