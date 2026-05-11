@@ -14,7 +14,7 @@ Dựa trên các file thực tế đã có sẵn trong thư mục `supports/` c�
 
 ## 🟢 Flow 1: Khởi tạo Kỳ thi & Đề thi (Exam Session & Assignment)
 
-1. Mở trình duyệt vào trang chủ: `http://localhost:3000/exam-sessions`
+1. Đầu tiên mở trình duyệt vào trang chủ: `http://localhost:3000/exam-sessions`
 2. Bấm nút màu cam **+ New Exam Session**.
    - Tại ô **Title**: Nhập `PE PRN232 - Ky Xuan 2026`.
    - Bấm nút **Create Exam Session**.
