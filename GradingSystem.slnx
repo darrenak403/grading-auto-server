@@ -1,0 +1,7 @@
+<Solution>
+  <Project Path="GradingSystem.Api/GradingSystem.Api.csproj" />
+  <Project Path="GradingSystem.Application/GradingSystem.Application.csproj" />
+  <Project Path="GradingSystem.Domain/GradingSystem.Domain.csproj" />
+  <Project Path="GradingSystem.Infrastructure/GradingSystem.Infrastructure.csproj" />
+  <Project Path="GradingSystem.Worker/GradingSystem.Worker.csproj" />
+</Solution>

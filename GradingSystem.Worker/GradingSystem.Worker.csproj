@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk.Worker">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UserSecretsId>dotnet-GradingSystem.Worker-861c1a49-dac1-43c4-9046-87548637c895</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="EPPlus" Version="7.*" />
+    <PackageReference Include="HtmlAgilityPack" Version="1.*" />
+    <PackageReference Include="MassTransit.RabbitMQ" Version="8.3.6" />
+    <PackageReference Include="Microsoft.Playwright" Version="1.52.*" />
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="5.*" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.*" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="8.*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\GradingSystem.Application\GradingSystem.Application.csproj" />
+    <ProjectReference Include="..\GradingSystem.Infrastructure\GradingSystem.Infrastructure.csproj" />
+  </ItemGroup>
+</Project>
