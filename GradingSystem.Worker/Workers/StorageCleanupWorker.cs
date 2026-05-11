@@ -12,9 +12,35 @@ public sealed class StorageCleanupWorker(
 
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
-        using var timer = new PeriodicTimer(TimeSpan.FromHours(_opts.IntervalHours));
-        while (await timer.WaitForNextTickAsync(ct))
-            RunCleanup();
+        while (!ct.IsCancellationRequested)
+        {
+            var now = DateTimeOffset.UtcNow;
+            var vietnamOffset = TimeSpan.FromHours(7); // Múi giờ Việt Nam (UTC+7)
+            var nowVietnam = now.ToOffset(vietnamOffset);
+
+            // Tính toán thời điểm 00:00 của ngày tiếp theo theo giờ Việt Nam
+            var nextMidnightVietnam = new DateTimeOffset(
+                nowVietnam.Year, nowVietnam.Month, nowVietnam.Day,
+                0, 0, 0, vietnamOffset).AddDays(1);
+
+            var delay = nextMidnightVietnam - nowVietnam;
+
+            logger.LogInformation("Next storage cleanup scheduled in {Hours}h {Minutes}m (at midnight Vietnam time)", delay.Hours, delay.Minutes);
+
+            try
+            {
+                await Task.Delay(delay, ct);
+            }
+            catch (TaskCanceledException)
+            {
+                break;
+            }
+
+            if (!ct.IsCancellationRequested)
+            {
+                RunCleanup();
+            }
+        }
     }
 
     private void RunCleanup()
@@ -22,14 +48,18 @@ public sealed class StorageCleanupWorker(
         var basePath = config["Storage:BasePath"];
         if (string.IsNullOrWhiteSpace(basePath)) return;
 
-        var cutoff = DateTime.UtcNow - TimeSpan.FromDays(_opts.RetentionDays);
-        int removed = 0;
+        int removedDirs = 0;
+        int removedFiles = 0;
 
-        removed += PurgeFiles(Path.Combine(basePath, "exports"), cutoff);
+        logger.LogInformation("Starting midnight storage cleanup...");
 
-        if (removed > 0)
-            logger.LogInformation("Storage cleanup removed {Count} item(s) older than {Days}d",
-                removed, _opts.RetentionDays);
+        var cutoff7Days = DateTime.UtcNow - TimeSpan.FromDays(7);
+
+        removedDirs += PurgeDirectories(Path.Combine(basePath, "submissions"), cutoff7Days);
+
+        removedFiles += PurgeFiles(Path.Combine(basePath, "exports"), DateTime.UtcNow);
+
+        logger.LogInformation("Midnight storage cleanup finished. Removed {DirCount} directories and {FileCount} files.", removedDirs, removedFiles);
     }
 
     private int PurgeDirectories(string root, DateTime cutoff)

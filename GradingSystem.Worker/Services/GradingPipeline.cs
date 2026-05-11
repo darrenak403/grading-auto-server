@@ -77,9 +77,20 @@ public class GradingPipeline(
         catch (Exception ex)
         {
             logger.LogError(ex, "Job {JobId} failed", job.Id);
-            job.Status        = JobStatus.Failed;
-            job.ErrorMessage  = ex.Message;
-            submission.Status = SubmissionStatus.Error;
+            
+            // Clear any partially tracked results from TestRunner to prevent duplicate key constraint violations
+            uow.ClearChanges();
+            
+            // Re-fetch job and submission because ClearChanges detached them
+            job = await uow.GradingJobs.GetByIdAsync(job.Id);
+            submission = await uow.Submissions.GetByIdAsync(submission.Id);
+            
+            if (job != null && submission != null)
+            {
+                job.Status        = JobStatus.Failed;
+                job.ErrorMessage  = ex.Message;
+                submission.Status = SubmissionStatus.Error;
+            }
 
             // Insert 0-score results for any question without a result for this job
             var existingResults = await uow.QuestionResults.FindAsync(r => r.GradingJobId == job.Id);

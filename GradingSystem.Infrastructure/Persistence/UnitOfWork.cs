@@ -17,6 +17,8 @@ public class UnitOfWork(GradingDbContext db) : IUnitOfWork
     public IGenericRepository<ExportJob>      ExportJobs      { get; } = new GenericRepository<ExportJob>(db);
 
     public Task<int> SaveChangesAsync(CancellationToken ct = default) => db.SaveChangesAsync(ct);
+    
+    public void ClearChanges() => db.ChangeTracker.Clear();
 
     public void Dispose() => db.Dispose();
 }

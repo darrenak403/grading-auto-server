@@ -23,6 +23,16 @@ services:
       - grading_net
     restart: unless-stopped
 
+  fe:
+    image: ${DOCKER_REPO}/grading-system-fe:${IMAGE_TAG}
+    depends_on:
+      - api
+    ports:
+      - '${FE_PORT:-3000}:3000'
+    networks:
+      - grading_net
+    restart: unless-stopped
+
   worker:
     image: ${DOCKER_REPO}/grading-system-worker:${IMAGE_TAG}
     depends_on:

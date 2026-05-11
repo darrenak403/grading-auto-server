@@ -16,7 +16,7 @@ public partial class ExamSessionService(IUnitOfWork unitOfWork, IPublishEndpoint
     {
         var entity = new ExamSession
         {
-            Title       = req.Title.Trim(),
+            Title = req.Title.Trim(),
             Description = req.Description?.Trim(),
         };
 
@@ -35,17 +35,17 @@ public partial class ExamSessionService(IUnitOfWork unitOfWork, IPublishEndpoint
 
         return new ExamSessionDto
         {
-            Id          = entity.Id,
-            Title       = entity.Title,
+            Id = entity.Id,
+            Title = entity.Title,
             Description = entity.Description,
-            CreatedAt   = entity.CreatedAt,
+            CreatedAt = entity.CreatedAt,
             Assignments = assignments.Select(a => new AssignmentSummaryDto
             {
-                Id          = a.Id,
-                Code        = a.Code,
-                Title       = a.Title,
+                Id = a.Id,
+                Code = a.Code,
+                Title = a.Title,
                 Description = a.Description,
-                CreatedAt   = a.CreatedAt,
+                CreatedAt = a.CreatedAt,
             }).ToList(),
         };
     }
@@ -56,10 +56,10 @@ public partial class ExamSessionService(IUnitOfWork unitOfWork, IPublishEndpoint
         return entities.OrderByDescending(e => e.CreatedAt)
             .Select(e => new ExamSessionSummaryDto
             {
-                Id          = e.Id,
-                Title       = e.Title,
+                Id = e.Id,
+                Title = e.Title,
                 Description = e.Description,
-                CreatedAt   = e.CreatedAt,
+                CreatedAt = e.CreatedAt,
             }).ToList();
     }
 
@@ -93,27 +93,27 @@ public partial class ExamSessionService(IUnitOfWork unitOfWork, IPublishEndpoint
         var participants = await unitOfWork.Participants.FindAsync(p => p.ExamSessionId == sessionId);
         var assignmentIds = participants.Select(p => p.AssignmentId).Distinct().ToList();
         var assignmentTitles = new Dictionary<Guid, string>();
-        var assignmentCodes  = new Dictionary<Guid, string>();
+        var assignmentCodes = new Dictionary<Guid, string>();
         foreach (var aId in assignmentIds)
         {
             var a = await unitOfWork.Assignments.GetByIdAsync(aId);
             if (a is not null)
             {
                 assignmentTitles[aId] = a.Title;
-                assignmentCodes[aId]  = a.Code;
+                assignmentCodes[aId] = a.Code;
             }
         }
 
         return participants.Select(p => new ParticipantDto
         {
-            Id              = p.Id,
-            ExamSessionId   = p.ExamSessionId,
-            Username        = p.Username,
-            StudentCode     = p.StudentCode,
-            AssignmentId    = p.AssignmentId,
-            AssignmentCode  = assignmentCodes.GetValueOrDefault(p.AssignmentId, ""),
+            Id = p.Id,
+            ExamSessionId = p.ExamSessionId,
+            Username = p.Username,
+            StudentCode = p.StudentCode,
+            AssignmentId = p.AssignmentId,
+            AssignmentCode = assignmentCodes.GetValueOrDefault(p.AssignmentId, ""),
             AssignmentTitle = assignmentTitles.GetValueOrDefault(p.AssignmentId, ""),
-            CreatedAt       = p.CreatedAt,
+            CreatedAt = p.CreatedAt,
         }).ToList();
     }
 
@@ -129,7 +129,7 @@ public partial class ExamSessionService(IUnitOfWork unitOfWork, IPublishEndpoint
 
         var participants = (await unitOfWork.Participants.FindAsync(p => p.ExamSessionId == sessionId)).ToList();
         var participantByStudentCode = participants.ToDictionary(p => p.StudentCode, StringComparer.OrdinalIgnoreCase);
-        var usernameByStudentCode    = participants.ToDictionary(p => p.StudentCode, p => p.Username, StringComparer.OrdinalIgnoreCase);
+        var usernameByStudentCode = participants.ToDictionary(p => p.StudentCode, p => p.Username, StringComparer.OrdinalIgnoreCase);
 
         var submissionsQuery = await unitOfWork.Submissions.FindAsync(s => assignmentIds.Contains(s.AssignmentId));
         var submissions = (gradingRound != null
@@ -176,13 +176,13 @@ public partial class ExamSessionService(IUnitOfWork unitOfWork, IPublishEndpoint
                 var qr = subResults.FirstOrDefault(r => r.QuestionId == q.Id);
                 return new QuestionSummaryResult
                 {
-                    QuestionId    = q.Id,
+                    QuestionId = q.Id,
                     QuestionTitle = q.Title,
-                    Score         = qr?.Score ?? 0,
-                    FinalScore    = qr?.FinalScore ?? 0,
-                    MaxScore      = q.MaxScore,
+                    Score = qr?.Score ?? 0,
+                    FinalScore = qr?.FinalScore ?? 0,
+                    MaxScore = q.MaxScore,
                     AdjustedScore = qr?.AdjustedScore,
-                    AdjustReason  = qr?.AdjustReason,
+                    AdjustReason = qr?.AdjustReason,
                     TestCaseResults = qr?.Detail is { Length: > 0 }
                         ? JsonSerializer.Deserialize<List<TestCaseResult>>(qr.Detail, _jsonOpts)
                         : null,
@@ -191,17 +191,17 @@ public partial class ExamSessionService(IUnitOfWork unitOfWork, IPublishEndpoint
 
             dtos.Add(new SessionSubmissionResultDto
             {
-                SubmissionId   = sub.Id,
-                Username       = usernameByStudentCode.GetValueOrDefault(sub.StudentCode, ""),
-                StudentCode    = sub.StudentCode,
+                SubmissionId = sub.Id,
+                Username = usernameByStudentCode.GetValueOrDefault(sub.StudentCode, ""),
+                StudentCode = sub.StudentCode,
                 AssignmentCode = assignmentCodeMap.GetValueOrDefault(sub.AssignmentId, ""),
-                GradingRound   = sub.GradingRound,
-                Status         = sub.Status,
-                HasArtifact    = sub.HasArtifact,
-                TotalScore     = qDtos.Sum(q => q.FinalScore),
-                MaxScore       = qDtos.Sum(q => q.MaxScore),
-                Questions      = qDtos,
-                Notes          = allNotes.FirstOrDefault(n => n.SubmissionId == sub.Id)?.Content,
+                GradingRound = sub.GradingRound,
+                Status = sub.Status,
+                HasArtifact = sub.HasArtifact,
+                TotalScore = qDtos.Sum(q => q.FinalScore),
+                MaxScore = qDtos.Sum(q => q.MaxScore),
+                Questions = qDtos,
+                Notes = allNotes.FirstOrDefault(n => n.SubmissionId == sub.Id)?.Content,
             });
         }
 
@@ -212,10 +212,10 @@ public partial class ExamSessionService(IUnitOfWork unitOfWork, IPublishEndpoint
 
     private static ExamSessionDto MapSummary(ExamSession e) => new()
     {
-        Id          = e.Id,
-        Title       = e.Title,
+        Id = e.Id,
+        Title = e.Title,
         Description = e.Description,
-        CreatedAt   = e.CreatedAt,
+        CreatedAt = e.CreatedAt,
     };
 
     [GeneratedRegex(@"[a-z]{2,3}\d{6}$", RegexOptions.IgnoreCase)]

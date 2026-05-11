@@ -16,4 +16,5 @@ public interface IUnitOfWork : IDisposable
     IGenericRepository<ExportJob> ExportJobs { get; }
 
     Task<int> SaveChangesAsync(CancellationToken ct = default);
+    void ClearChanges();
 }

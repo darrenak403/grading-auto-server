@@ -62,9 +62,9 @@ public partial class ArtifactRunner(
 
             StripPublishingListenConfigFromAppSettings(givenRoot);
 
-            var givenDll = FindEntryDll(givenRoot);
+            var givenTarget = FindExecutableTarget(givenRoot);
             var givenPort = PickPort();
-            var givenProcess = StartDotnet(givenDll, givenPort);
+            var givenProcess = StartDotnet(givenTarget, givenPort);
             var bindHost = opts.Value.BindHost;
             await WaitForPortAsync($"http://{bindHost}:{givenPort}", givenProcess, ct);
 
@@ -103,11 +103,11 @@ public partial class ArtifactRunner(
                 }
             }
 
-            var dll = FindEntryDll(questionDir);
+            var target = FindExecutableTarget(questionDir);
             var port = PickPort();
             var env = BuildEnv(question, dbName, effectiveGivenApiBaseUrl, questionDir);
 
-            var process = StartDotnet(dll, port, env);
+            var process = StartDotnet(target, port, env);
             await WaitForPortAsync($"http://{opts.Value.BindHost}:{port}", process, ct);
 
             ctx.QuestionApps[question.Id] = new QuestionApp { Process = process, Port = port };
@@ -256,23 +256,33 @@ public partial class ArtifactRunner(
         return result;
     }
 
-    private static string FindEntryDll(string dir)
+    private record ExecutableTarget(bool IsProject, string Path);
+
+    private static ExecutableTarget FindExecutableTarget(string dir)
     {
-        var runtimeConfig = Directory.GetFiles(dir, "*.runtimeconfig.json", SearchOption.AllDirectories)
-                                     .FirstOrDefault();
-        if (runtimeConfig != null)
+        // 1. Look for published app (has runtimeconfig.json)
+        var runtimeConfigs = Directory.GetFiles(dir, "*.runtimeconfig.json", SearchOption.AllDirectories);
+        foreach (var rc in runtimeConfigs)
         {
-            var dll = runtimeConfig.Replace(".runtimeconfig.json", ".dll");
-            if (File.Exists(dll)) return dll;
+            var dll = rc.Replace(".runtimeconfig.json", ".dll");
+            if (File.Exists(dll)) return new ExecutableTarget(false, dll);
         }
 
+        // 2. Look for raw source code (has .csproj)
+        var csproj = Directory.GetFiles(dir, "*.csproj", SearchOption.AllDirectories).FirstOrDefault();
+        if (csproj != null)
+        {
+            return new ExecutableTarget(true, csproj);
+        }
+
+        // 3. Fallback to any DLL
         var candidateDll = Directory.GetFiles(dir, "*.dll", SearchOption.AllDirectories)
             .FirstOrDefault(f => !f.Contains(".Views.") && !f.EndsWith(".runtimeconfig.dll"));
 
-        if (candidateDll == null)
-            throw new InvalidOperationException($"No suitable DLL found in {dir}");
+        if (candidateDll != null)
+            return new ExecutableTarget(false, candidateDll);
 
-        return candidateDll;
+        throw new InvalidOperationException($"No suitable .csproj or published DLL found in {dir}");
     }
 
     private static void StripPublishingListenConfigFromAppSettings(string rootDir)
@@ -301,17 +311,36 @@ public partial class ArtifactRunner(
         }
     }
 
-    private Process StartDotnet(string dll, int port, Dictionary<string, string>? env = null)
+    private Process StartDotnet(ExecutableTarget target, int port, Dictionary<string, string>? env = null)
     {
-        // --urls wins over appsettings / hardcoded UseUrls (e.g. http://127.0.0.1:5100 in publish)
         var bindUrl = $"http://{opts.Value.BindHost}:{port}";
-        var psi = new ProcessStartInfo("dotnet", $"\"{dll}\" --urls={bindUrl}")
+        
+        var psi = new ProcessStartInfo("dotnet")
         {
-            WorkingDirectory = Path.GetDirectoryName(dll),
+            WorkingDirectory = Path.GetDirectoryName(target.Path),
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
         };
+
+        var fileName = Path.GetFileName(target.Path);
+
+        if (target.IsProject)
+        {
+            psi.ArgumentList.Add("run");
+            psi.ArgumentList.Add("--project");
+            psi.ArgumentList.Add(fileName);
+            psi.ArgumentList.Add("--");
+            psi.ArgumentList.Add($"--urls={bindUrl}");
+        }
+        else
+        {
+            psi.ArgumentList.Add(fileName);
+            psi.ArgumentList.Add($"--urls={bindUrl}");
+        }
+        
+        logger.LogInformation("StartDotnet -> WorkingDir: {Wd}, Args: {Args}", psi.WorkingDirectory, string.Join(" ", psi.ArgumentList));
+
         psi.Environment["ASPNETCORE_URLS"] = bindUrl;
         psi.Environment["ASPNETCORE_ENVIRONMENT"] = "Development"; // ensures Swagger is enabled in student apps
         if (env != null)
