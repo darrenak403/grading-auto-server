@@ -1,5 +1,6 @@
 services:
   api:
+    container_name: grading-api
     image: ${DOCKER_REPO}/grading-system-api:${IMAGE_TAG}
     depends_on:
       postgres:
@@ -18,12 +19,13 @@ services:
     ports:
       - '${API_PORT}:8080'
     volumes:
-      - storage_data:/storage
+      - grading_storage_data:/storage
     networks:
       - grading_net
     restart: unless-stopped
 
   fe:
+    container_name: grading-fe
     image: ${DOCKER_REPO}/grading-system-fe:${IMAGE_TAG}
     depends_on:
       - api
@@ -34,6 +36,7 @@ services:
     restart: unless-stopped
 
   worker:
+    container_name: grading-worker
     image: ${DOCKER_REPO}/grading-system-worker:${IMAGE_TAG}
     depends_on:
       postgres:
@@ -56,12 +59,13 @@ services:
       Worker__ArtifactPortRangeStart: ${WORKER_ARTIFACT_PORT_RANGE_START}
       Worker__ArtifactPortRangeEnd: ${WORKER_ARTIFACT_PORT_RANGE_END}
     volumes:
-      - storage_data:/storage
+      - grading_storage_data:/storage
     networks:
       - grading_net
     restart: unless-stopped
 
   postgres:
+    container_name: grading-postgres
     image: postgres:16-alpine
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
@@ -70,7 +74,7 @@ services:
     ports:
       - '${POSTGRES_PUBLISH_PORT}:5432'
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - grading_postgres_data:/var/lib/postgresql/data
     networks:
       - grading_net
     healthcheck:
@@ -81,7 +85,9 @@ services:
     restart: unless-stopped
 
   sqlserver:
+    container_name: grading-sqlserver
     image: mcr.microsoft.com/mssql/server:2022-latest
+    platform: linux/amd64
     environment:
       ACCEPT_EULA: 'Y'
       SA_PASSWORD: ${SA_PASSWORD}
@@ -89,7 +95,7 @@ services:
     ports:
       - '${SQLSERVER_PUBLISH_PORT}:1433'
     volumes:
-      - sqlserver_data:/var/opt/mssql
+      - grading_sqlserver_data:/var/opt/mssql
     networks:
       - grading_net
     healthcheck:
@@ -105,6 +111,7 @@ services:
     restart: unless-stopped
 
   rabbitmq:
+    container_name: grading-rabbitmq
     image: rabbitmq:3-management-alpine
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
@@ -113,7 +120,7 @@ services:
       - '${RABBITMQ_AMQP_PORT}:5672'
       - '${RABBITMQ_UI_PORT}:15672'
     volumes:
-      - rabbitmq_data:/var/lib/rabbitmq
+      - grading_rabbitmq_data:/var/lib/rabbitmq
     networks:
       - grading_net
     healthcheck:
@@ -125,6 +132,7 @@ services:
     restart: unless-stopped
 
   pgweb:
+    container_name: grading-pgweb
     profiles: [tools]
     image: sosedoff/pgweb:latest
     depends_on:
@@ -139,11 +147,16 @@ services:
     restart: unless-stopped
 
 volumes:
-  postgres_data:
-  sqlserver_data:
-  rabbitmq_data:
-  storage_data:
+  grading_postgres_data:
+    name: grading_postgres_data
+  grading_sqlserver_data:
+    name: grading_sqlserver_data
+  grading_rabbitmq_data:
+    name: grading_rabbitmq_data
+  grading_storage_data:
+    name: grading_storage_data
 
 networks:
   grading_net:
+    name: grading_net
     driver: bridge

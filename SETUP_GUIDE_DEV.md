@@ -6,6 +6,7 @@ Tài liệu này dành cho các lập trình viên (Developer) muốn chạy Bac
 
 - **Docker Desktop** (để chạy DB).
 - **.NET 8 SDK** (để chạy Backend API và Worker).
+- **Node.js 18+** (để chạy Frontend).
 - IDE khuyên dùng: Visual Studio 2022, JetBrains Rider, hoặc VS Code.
 
 ## 2. Khởi chạy Hạ tầng (Databases & RabbitMQ)
@@ -22,25 +23,52 @@ Tài liệu này dành cho các lập trình viên (Developer) muốn chạy Bac
    docker compose -f docker-compose.dev.yml up -d
    ```
 
-   Lệnh này sẽ chạy các container: `postgres`, `sqlserver`, `rabbitmq`.
+   Lệnh này sẽ chạy các container: `grading-postgres`, `grading-sqlserver`, `grading-rabbitmq`.
 
    > **💡 Lưu ý cho máy Mac chip M (ARM64):**
-   > Image của `sqlserver` (`mcr.microsoft.com/mssql/server`) hiện tại chỉ hỗ trợ kiến trúc `linux/amd64`. Khi chạy lệnh trên máy Mac M1/M2/M3, bạn có thể thấy cảnh báo _"The requested image's platform (linux/amd64) does not match the detected host platform"_. Đừng lo lắng, Docker trên Mac (thông qua Rosetta) vẫn sẽ tự động giả lập và chạy SQL Server bình thường.
+   > Image của `sqlserver` hiện tại chỉ hỗ trợ kiến trúc `linux/amd64`. Tuy nhiên, file compose đã được cấu hình `platform: linux/amd64` nên Docker trên Mac sẽ tự động giả lập và chạy SQL Server bình thường.
 
-## 3. Khởi chạy Backend (.NET API & Worker)
+## 3. Khởi chạy Backend (API & Worker)
 
-1. Mở file `Project.sln` bằng Visual Studio hoặc Rider.
-2. Thiết lập dự án `GradingSystem.Api` làm **Startup Project** và chạy (nhấn F5 hoặc nút Play).
-3. (Tùy chọn) Nếu bạn đang phát triển phần xử lý background job, bạn cũng có thể mở Terminal mới, trỏ vào thư mục `GradingSystem.Worker` và chạy `dotnet run`.
-4. API sẽ chạy ở địa chỉ mặc định: `http://localhost:5049` (hoặc cổng được set trong `launchSettings.json`).
-5. Vào `http://localhost:5049/swagger` để xem tài liệu API.
+Sau khi hạ tầng Docker đã chạy, bạn khởi động API và Worker bằng lệnh `dotnet run` (mở mỗi cái ở một Terminal riêng):
 
-## 4. Quản lý Hạ tầng Dev
+### 3.1. Chạy API
+
+```bash
+cd be/GradingSystem.Api
+dotnet run
+```
+
+- API sẽ chạy mặc định tại: `http://localhost:5049`
+- Tài liệu Swagger: `http://localhost:5049/swagger`
+
+### 3.2. Chạy Worker (Xử lý chấm điểm)
+
+```bash
+cd be/GradingSystem.Worker
+dotnet run
+```
+
+- Worker sẽ lắng nghe các job chấm điểm từ RabbitMQ.
+
+## 4. Khởi chạy Frontend (Next.js)
+
+Mở một Terminal mới để chạy Frontend:
+
+```bash
+cd fe
+npm install
+npm run dev
+```
+
+- Giao diện Web: `http://localhost:3000`
+
+## 5. Quản lý Hạ tầng Dev
 
 - Nếu muốn xem **PGWeb** (Giao diện web để quản lý Database Postgres), bạn chạy lệnh kèm profile `tools`:
 
   ```bash
-  docker compose -f docker-compose.dev.yml --profile tools up -d pgweb
+  docker compose -f docker-compose.dev.yml --profile tools up -d
   ```
 
   Sau đó vào: `http://localhost:8081`
