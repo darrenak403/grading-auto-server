@@ -69,6 +69,16 @@ Kiểm tra container: `docker compose -f docker-compose.dev.yml ps`
 
 ---
 
+## Lỗi thường gặp
+
+| Lỗi | Cách xử lý |
+|-----|------------|
+| `Storage:BasePath must be configured for Production` | Chạy `task dev:api` / `task dev:worker` (đừng `dotnet run` thuần). Task đã set `Development`; hoặc pull `launchSettings.json` mới trong repo |
+| `Task "api" does not exist` | Đổi tên task: `task dev:api`, `task dev:worker` |
+| Docker không kết nối | Bật Docker Desktop → `task dev:up` |
+
+---
+
 ## Không dùng Task (thủ công)
 
 <details>
