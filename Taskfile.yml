@@ -1,6 +1,6 @@
-# Taskfile cho PRN232 Auto Grader Backend
-# Cài đặt: https://taskfile.dev/installation/
-# Xem danh sách lệnh: task --list
+# Taskfile — PRN232 Auto Grader
+# Cài Task: https://taskfile.dev/installation/
+# Danh sách lệnh: task --list
 
 version: '3'
 
@@ -21,37 +21,57 @@ tasks:
       - task --list
     silent: true
 
-  # --- Thiết lập ban đầu ---
-
-  env:
-    desc: Tạo file .env từ .env.example (bỏ qua nếu đã tồn tại)
-    cmds:
-      - |
-        if [ ! -f .env ]; then
-          cp .env.example .env
-          echo "Đã tạo .env — hãy chỉnh sửa theo môi trường của bạn."
-        else
-          echo ".env đã tồn tại, bỏ qua."
-        fi
-    status:
-      - test -f .env
+  # --- Setup nhanh (đọc RUN_FOR_DEV.md / RUN_FOR_USER.md) ---
 
   setup:
-    desc: Thiết lập dev lần đầu (env + infra + Playwright + migrate DB)
+    desc: Alias → setup:dev (developer)
     cmds:
-      - task: env
+      - task: setup:dev
+
+  setup:dev:
+    desc: 'Dev lần đầu: restore + Docker infra + Playwright + migrate (cần .env sẵn — RUN_FOR_DEV.md)'
+    cmds:
+      - task: restore
+      - task: storage:init
       - task: infra:up
+      - task: infra:wait
       - task: playwright:install
       - task: db:migrate
+
+  setup:user:
+    desc: 'User: Docker full stack (cần .env sẵn). Xem RUN_FOR_USER.md'
+    cmds:
+      - task: prod:up
+      - cmd: echo "Đợi 2–3 phút để API/Worker khởi động và migrate DB, rồi mở http://localhost:${FE_PORT:-3000}"
+
+  storage:init:
+    desc: Tạo thư mục storage/ (upload local)
+    cmds:
+      - mkdir -p storage
+    status:
+      - test -d storage
 
   # --- Hạ tầng Docker (Development) ---
 
   infra:up:
-    desc: Khởi động Postgres, SQL Server, RabbitMQ (dev)
+    desc: Postgres + SQL Server + RabbitMQ (dev)
     cmds:
       - '{{.COMPOSE_DEV}} up -d'
-    deps:
-      - env
+
+  infra:wait:
+    desc: Đợi PostgreSQL sẵn sàng (trước migrate)
+    cmds:
+      - |
+        echo "Đợi PostgreSQL..."
+        for i in $(seq 1 60); do
+          if {{.COMPOSE_DEV}} exec -T postgres pg_isready -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-grading_system}" >/dev/null 2>&1; then
+            echo "PostgreSQL ready."
+            exit 0
+          fi
+          sleep 2
+        done
+        echo "PostgreSQL chưa sẵn sàng sau 120s. Kiểm tra: task infra:ps"
+        exit 1
 
   infra:stop:
     desc: Dừng container dev (giữ dữ liệu)
@@ -64,34 +84,38 @@ tasks:
       - '{{.COMPOSE_DEV}} down'
 
   infra:reset:
-    desc: Xóa container dev và toàn bộ volumes (reset DB)
+    desc: Xóa container dev và volumes (reset DB)
     prompt: Bạn có chắc muốn xóa toàn bộ dữ liệu dev?
     cmds:
       - '{{.COMPOSE_DEV}} down -v'
 
   infra:tools:
-    desc: Bật thêm pgWeb (profile tools) — http://localhost:8081
+    desc: Bật pgWeb (profile tools) — http://localhost:8081
     cmds:
       - '{{.COMPOSE_DEV}} --profile tools up -d'
 
   infra:logs:
-    desc: Xem log các service hạ tầng dev
+    desc: Log hạ tầng dev
     cmds:
       - '{{.COMPOSE_DEV}} logs -f --tail=100'
 
   infra:ps:
-    desc: Trạng thái container hạ tầng dev
+    desc: Trạng thái container dev
     cmds:
       - '{{.COMPOSE_DEV}} ps'
 
-  # --- Production (Docker full stack) ---
+  # --- Production / User (Docker full stack, không cần dotnet run) ---
 
   prod:up:
-    desc: Chạy toàn bộ stack production (build + up)
+    desc: Pull & chạy full stack (FE, API, Worker, DB) — dùng cho end-user
+    cmds:
+      - '{{.COMPOSE_PROD}} pull'
+      - '{{.COMPOSE_PROD}} up -d'
+
+  prod:build:
+    desc: Build image local rồi chạy stack (khi dev image)
     cmds:
       - '{{.COMPOSE_PROD}} up -d --build'
-    deps:
-      - env
 
   prod:down:
     desc: Dừng stack production
@@ -99,83 +123,81 @@ tasks:
       - '{{.COMPOSE_PROD}} down'
 
   prod:logs:
-    desc: Xem log stack production
+    desc: Log stack production
     cmds:
       - '{{.COMPOSE_PROD}} logs -f --tail=100'
 
   prod:ps:
-    desc: Trạng thái container production
+    desc: Trạng thái stack production
     cmds:
       - '{{.COMPOSE_PROD}} ps'
 
   # --- .NET ---
 
   restore:
-    desc: dotnet restore solution
+    desc: dotnet restore
     cmds:
       - dotnet restore {{.SOLUTION}}
 
   build:
-    desc: Build solution (Debug)
+    desc: Build Debug
     cmds:
       - dotnet build {{.SOLUTION}} -c Debug --no-restore
     deps:
       - restore
 
   build:release:
-    desc: Build solution (Release)
+    desc: Build Release
     cmds:
       - dotnet build {{.SOLUTION}} -c Release
 
   clean:
-    desc: Xóa thư mục bin/obj
+    desc: Xóa bin/obj
     cmds:
       - dotnet clean {{.SOLUTION}}
-      - find . -type d \( -name bin -o -name obj \) -prune -exec rm -rf {} +
+      - find . -type d \( -name bin -o -name obj \) -prune -exec rm -rf {} + 2>/dev/null || true
 
   api:
-    desc: Chạy API (http://localhost:5049, Swagger /swagger)
+    desc: Chạy API local — http://localhost:5049/swagger
     dir: '{{.API_DIR}}'
     interactive: true
     cmds:
       - dotnet run
 
   api:watch:
-    desc: Chạy API với hot reload (dotnet watch)
+    desc: API hot reload
     dir: '{{.API_DIR}}'
     interactive: true
     cmds:
       - dotnet watch run
 
   worker:
-    desc: Chạy Worker chấm điểm (cần infra + Playwright)
+    desc: Chạy Worker local (cần infra + Playwright)
     dir: '{{.WORKER_DIR}}'
     interactive: true
     cmds:
       - dotnet run
 
   worker:watch:
-    desc: Chạy Worker với hot reload
+    desc: Worker hot reload
     dir: '{{.WORKER_DIR}}'
     interactive: true
     cmds:
       - dotnet watch run
 
-  # --- Database (EF Core) ---
+  # --- Database ---
 
   db:migrate:
-    desc: Áp dụng migrations lên PostgreSQL
+    desc: EF migrate PostgreSQL
     dir: '{{.API_DIR}}'
     cmds:
       - >-
         dotnet ef database update
         --project ../{{.INFRA_PROJECT}}
         --startup-project .
-    deps:
-      - env
 
   db:migration:add:
-    desc: 'Tạo migration mới (task db:migration:add NAME=TenMigration)'
+    desc: 'Migration mới: task db:migration:add NAME=TenMigration'
     dir: '{{.API_DIR}}'
     cmds:
       - >-
@@ -185,10 +207,10 @@ tasks:
         --output-dir Persistence/Migrations
     preconditions:
       - sh: test -n "{{.NAME}}"
-        msg: 'Thiếu tên migration. Ví dụ: task db:migration:add NAME=AddFoo'
+        msg: 'Thiếu NAME. Ví dụ: task db:migration:add NAME=AddFoo'
 
   db:migration:remove:
-    desc: Xóa migration cuối (chưa apply hoặc đã rollback)
+    desc: Xóa migration cuối
     dir: '{{.API_DIR}}'
     cmds:
       - >-
@@ -196,46 +218,48 @@ tasks:
         --project ../{{.INFRA_PROJECT}}
         --startup-project .
 
-  # --- Playwright (Worker UI grading) ---
+  # --- Playwright ---
 
   playwright:install-cli:
-    desc: Cài Microsoft.Playwright.CLI global tool
+    desc: Cài/cập nhật Playwright CLI global
     cmds:
-      - dotnet tool install --global Microsoft.Playwright.CLI
+      - dotnet tool install --global Microsoft.Playwright.CLI || dotnet tool update --global Microsoft.Playwright.CLI
 
   playwright:install-browsers:
-    desc: Tải Chromium cho Playwright
+    desc: Tải Chromium
     cmds:
       - |
         if command -v playwright >/dev/null 2>&1; then
           playwright install chromium
         elif [ -x "$HOME/.dotnet/tools/playwright" ]; then
           "$HOME/.dotnet/tools/playwright" install chromium
+        elif [ -f "$USERPROFILE/.dotnet/tools/playwright.cmd" ]; then
+          "$USERPROFILE/.dotnet/tools/playwright.cmd" install chromium
         else
-          echo "Chưa có playwright CLI. Chạy: task playwright:install-cli"
+          echo "Chưa có playwright CLI → task playwright:install-cli"
           exit 1
         fi
 
   playwright:install:
-    desc: Cài CLI + trình duyệt Chromium (bắt buộc cho dev)
+    desc: CLI + Chromium (bắt buộc cho Worker dev)
     cmds:
       - task: playwright:install-cli
       - task: playwright:install-browsers
 
-  # --- Docker image build (local) ---
+  # --- Build image local ---
 
   docker:build:api:
-    desc: Build image API local
+    desc: Build image API
     cmds:
       - docker build -f {{.API_DIR}}/Dockerfile -t grading-system-api:local .
 
   docker:build:worker:
-    desc: Build image Worker local
+    desc: Build image Worker
     cmds:
       - docker build -f {{.WORKER_DIR}}/Dockerfile -t grading-system-worker:local .
 
   docker:build:
-    desc: Build cả image API và Worker
+    desc: Build image API + Worker
     cmds:
       - task: docker:build:api
       - task: docker:build:worker
