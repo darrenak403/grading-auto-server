@@ -43,6 +43,8 @@ task dev:api      # terminal 1 — http://localhost:5049/swagger
 task dev:worker   # terminal 2
 ```
 
+> Task tự set `ASPNETCORE_ENVIRONMENT=Development` (`.env` chỉ dùng cho Docker). Nếu chạy `dotnet run` trực tiếp, dùng `Properties/launchSettings.json` trong project.
+
 **Không** chạy lại `dev:setup`.
 
 ### Tắt cuối ngày
