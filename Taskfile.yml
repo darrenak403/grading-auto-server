@@ -60,6 +60,25 @@ tasks:
     cmds:
       - '{{.COMPOSE_DEV}} stop'
 
+  dev:kill:
+    desc: '[Dev] Dừng API/Worker trên máy (trước khi build lại — tránh MSB3027)'
+    cmds:
+      - |
+        if command -v taskkill >/dev/null 2>&1; then
+          taskkill //F //IM GradingSystem.Api.exe 2>/dev/null || true
+          taskkill //F //IM GradingSystem.Worker.exe 2>/dev/null || true
+        else
+          pkill -f 'GradingSystem.Api' 2>/dev/null || true
+          pkill -f 'GradingSystem.Worker' 2>/dev/null || true
+        fi
+        echo "Đã dừng API/Worker (nếu đang chạy)."
+
+  dev:build:
+    desc: '[Dev] Dừng API/Worker rồi build solution'
+    cmds:
+      - task: dev:kill
+      - dotnet build {{.SOLUTION}} -c Debug
+
   dev:api:
     desc: '[Dev] Chạy API — http://localhost:5049/swagger'
     dir: '{{.API_DIR}}'
