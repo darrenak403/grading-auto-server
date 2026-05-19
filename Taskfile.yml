@@ -197,30 +197,61 @@ tasks:
         --startup-project .
 
   # --- Playwright (Worker UI grading) ---
+  # .NET Playwright: phải dotnet build Worker trước, rồi mới cài browser (playwright.ps1).
+
+  playwright:build:
+    desc: Build Worker (bắt buộc trước khi cài browser Playwright)
+    dir: '{{.WORKER_DIR}}'
+    cmds:
+      - dotnet restore
+      - dotnet build -c Debug
 
   playwright:install-cli:
     desc: Cài Microsoft.Playwright.CLI global tool
     cmds:
       - dotnet tool install --global Microsoft.Playwright.CLI
+    status:
+      - dotnet tool list -g | grep -qi playwright
 
   playwright:install-browsers:
-    desc: Tải Chromium cho Playwright
+    desc: Tải Chromium (Mac/Linux) — chạy script sau khi build Worker
+    dir: '{{.WORKER_DIR}}'
+    deps:
+      - playwright:build
+    platforms: [darwin, linux]
     cmds:
       - |
-        if command -v playwright >/dev/null 2>&1; then
+        set -e
+        SCRIPT="./bin/Debug/net8.0/playwright.sh"
+        PS1="./bin/Debug/net8.0/playwright.ps1"
+        if [ -f "$SCRIPT" ]; then
+          "$SCRIPT" install chromium
+        elif command -v pwsh >/dev/null 2>&1 && [ -f "$PS1" ]; then
+          pwsh -NoProfile -File "$PS1" install chromium
+        elif command -v playwright >/dev/null 2>&1; then
           playwright install chromium
         elif [ -x "$HOME/.dotnet/tools/playwright" ]; then
           "$HOME/.dotnet/tools/playwright" install chromium
         else
-          echo "Chưa có playwright CLI. Chạy: task playwright:install-cli"
+          echo "Không tìm thấy playwright. Cài PowerShell (pwsh) hoặc: task playwright:install-cli"
           exit 1
         fi
 
+  playwright:install-browsers:windows:
+    desc: Tải Chromium (Windows) — chạy playwright.ps1 sau khi build Worker
+    dir: '{{.WORKER_DIR}}'
+    deps:
+      - playwright:build
+    platforms: [windows]
+    cmds:
+      - powershell -NoProfile -ExecutionPolicy Bypass -File .\bin\Debug\net8.0\playwright.ps1 install chromium
+
   playwright:install:
-    desc: Cài CLI + trình duyệt Chromium (bắt buộc cho dev)
+    desc: Cài CLI + build Worker + Chromium (bắt buộc cho dev)
     cmds:
       - task: playwright:install-cli
       - task: playwright:install-browsers
+      - task: playwright:install-browsers:windows
 
   # --- Docker image build (local) ---
 
