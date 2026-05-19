@@ -33,6 +33,7 @@ jobs:
               - 'GradingSystem.Domain/**'
               - 'GradingSystem.Infrastructure/**'
               - 'GradingSystem.slnx'
+              - 'Project.sln'
               - '.github/workflows/**'
             worker:
               - 'GradingSystem.Worker/**'
@@ -40,6 +41,7 @@ jobs:
               - 'GradingSystem.Domain/**'
               - 'GradingSystem.Infrastructure/**'
               - 'GradingSystem.slnx'
+              - 'Project.sln'
               - '.github/workflows/**'
 
       - name: Set up Docker Buildx
