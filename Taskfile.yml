@@ -64,6 +64,10 @@ tasks:
     desc: '[Dev] Chạy API — http://localhost:5049/swagger'
     dir: '{{.API_DIR}}'
     interactive: true
+    env:
+      # .env dành cho Docker; dotnet run mặc định Production nếu không set
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://localhost:5049
     cmds:
       - dotnet run
 
@@ -71,6 +75,9 @@ tasks:
     desc: '[Dev] Chạy Worker chấm điểm'
     dir: '{{.WORKER_DIR}}'
     interactive: true
+    env:
+      DOTNET_ENVIRONMENT: Development
+      ASPNETCORE_ENVIRONMENT: Development
     cmds:
       - dotnet run
 
@@ -136,6 +143,8 @@ tasks:
   _dev:migrate:
     internal: true
     dir: '{{.API_DIR}}'
+    env:
+      ASPNETCORE_ENVIRONMENT: Development
     cmds:
       - >-
         dotnet ef database update
