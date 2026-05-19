@@ -101,20 +101,13 @@ Chỉnh sửa `.env` theo môi trường của bạn (xem phần [Biến môi tr
 
 Trong chế độ dev, chỉ chạy **infrastructure** bằng Docker. **API** và **Worker** chạy trực tiếp trên máy (`dotnet run`). Repo này không chứa mã frontend — UI web lấy từ image Docker khi deploy production.
 
-**Thiết lập một lần (khuyến nghị):**
+Cần `.env` trước (`cp .env.example .env`). Chi tiết: [`RUN_FOR_DEV.md`](RUN_FOR_DEV.md).
 
-```bash
-task setup:dev
-```
-
-Cần có `.env` trước (copy từ `.env.example`). `task setup:dev`: restore, infra Docker, Playwright, migrate. Chi tiết: [`RUN_FOR_DEV.md`](RUN_FOR_DEV.md).
-
-**Chạy hằng ngày (2 terminal):**
-
-```bash
-task api       # http://localhost:5049 — Swagger: /swagger
-task worker
-```
+| Giai đoạn | Lệnh |
+|-----------|------|
+| Lần đầu | `task dev:setup` |
+| Hằng ngày | `task dev:up` → `task dev:api` + `task dev:worker` |
+| Tắt | `task dev:down` |
 
 **Thủ công — infrastructure:**
 
@@ -127,26 +120,23 @@ docker compose -f docker-compose.dev.yml up -d
 | PostgreSQL 16 | 5432 | DB chính |
 | SQL Server 2022 | 1433 | DB Q1 sinh viên |
 | RabbitMQ | 5672 (AMQP), 15672 (UI) | Message broker |
-| pgWeb (profile `tools`) | 8081 | `task infra:tools` |
+| pgWeb (profile `tools`) | 8081 | `docker compose -f docker-compose.dev.yml --profile tools up -d` |
 
 RabbitMQ Management UI: http://localhost:15672 — đăng nhập theo `RABBITMQ_USER` / `RABBITMQ_PASSWORD` trong `.env` (mặc định `grading` / `grading_pass`).
 
-**Migrate database (nếu chưa chạy `task setup`):**
-
-```bash
-task db:migrate
-```
+Sau khi xóa volume dev: `task dev:reset` (xem [`RUN_FOR_DEV.md`](RUN_FOR_DEV.md)).
 
 ---
 
 ### Chế độ Production
 
-Chạy toàn bộ stack (FE, API, Worker, DB) trong Docker — **không cần** `task api` / `task worker`. Xem [`RUN_FOR_USER.md`](RUN_FOR_USER.md).
+Chỉ Docker — xem [`RUN_FOR_USER.md`](RUN_FOR_USER.md).
 
-```bash
-task setup:user
-# hoặc: task prod:up
-```
+| Giai đoạn | Lệnh |
+|-----------|------|
+| Lần đầu | `task user:setup` |
+| Hằng ngày | `task user:up` |
+| Tắt | `task user:down` |
 
 | Service     | Port (mặc định `.env`) | URL |
 | ----------- | ---------------------- | --- |
@@ -155,7 +145,7 @@ task setup:user
 | RabbitMQ UI | 15672                  | http://localhost:15672 |
 | pgWeb       | 8081                   | http://localhost:8081 |
 
-Dừng toàn bộ: `task prod:down`
+Dừng: `task user:down`
 
 ---
 
