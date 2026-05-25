@@ -2,9 +2,15 @@
 
 | File | Mục đích |
 |------|----------|
-| `.env.example` | Mẫu biến — copy → `.env.local` |
+| `.env.example` | Mẫu biến |
 | `.env.local` | Dev (gitignored) |
-| `docker-compose.dev.yml` | Stack dev |
-| `docker-compose.prod.yml` | Tham khảo stack VPS — deploy qua **Dokploy** |
+| `.env` | Prod / Dokploy (gitignored) |
+| `docker-compose.dev.yml` | Dev: infra + profile `app` (chỉ dùng cho `docker:build`) |
+| `docker-compose.prod.yml` | Full stack + `pull_policy: always` |
 
-Hướng dẫn dev: [`../BE.md`](../BE.md)
+Hướng dẫn: [`../BE.md`](../BE.md)
+
+**Dev:** `task docker:up` → infra. App chạy `task run` + `task run:worker`.  
+`task docker:build` build image `api`/`worker` (profile `app`, không tự `up`).
+
+**Prod:** `DOCKER_REPO` = Docker Hub user (= `DOCKER_USERNAME` trong CI).

@@ -2,69 +2,30 @@
 
 Tổng quan: [`README.md`](README.md). FE **repo riêng**.
 
-Tạo `docker/.env.local` tay (mẫu: `docker/.env.example`). `CORS_ORIGIN_*` trỏ URL FE.
-
----
-
-## Docker (API + Worker trong container)
-
-```bash
-task docker:build    # sau khi sửa code C#
-task docker:up
-```
-
-Image từ registry: `task docker:pull` → `task docker:up`.
-
-| URL | Mặc định |
-|-----|----------|
-| Swagger | http://localhost:5049/swagger |
-| RabbitMQ UI | http://localhost:15672 |
-
-`task docker:down` · `task docker:logs`
-
----
-
-## Local (dotnet trên máy)
+Tạo `docker/.env.local` từ `docker/.env.example`.
 
 ```bash
 task docker:up
-docker compose --env-file docker/.env.local -f docker/docker-compose.dev.yml stop api worker
+task run          # terminal 1
+task run:worker   # terminal 2
 ```
-
-Hai terminal: `task run` · `task run:worker`
 
 Swagger: http://localhost:5049/swagger
 
----
-
-## Sau khi sửa code
-
-| Cách | Lệnh |
-|------|------|
-| Docker | `task docker:build` → `task docker:up` |
-| Local | Restart `task run` / `task run:worker` |
-
-Pull image mới: `task docker:pull` → `task docker:up`
-
----
-
-## CI / CD
-
-| Bước | Công cụ |
-|------|---------|
-| CI (push `main`) | GitHub Actions [`.github/workflows/ci-docker.yml`](.github/workflows/ci-docker.yml) — build/push Docker Hub |
-| CD (VPS) | **Dokploy** — pull image và deploy |
-
-Secrets repo CI: `DOCKER_USERNAME`, `DOCKER_PASSWORD`.  
-Image: `{DOCKER_USERNAME}/grading-system-{api,worker}:latest` (và `:sha`).
-
----
-
-## Lệnh Task
-
 | Lệnh | Mô tả |
 |------|--------|
-| `run` | API local |
-| `run:worker` | Worker local |
-| `docker:build` | Build image |
-| `docker:up` / `docker:down` / `docker:pull` / `docker:logs` | Container |
+| `docker:up` | Infra (`up --no-build`) |
+| `docker:build` | Build image API + Worker (đổi code / test image local) |
+| `docker:down` | Tắt infra |
+| `docker:logs` | Xem log infra |
+| `run` | API (`dotnet run`) |
+| `run:worker` | Worker (`dotnet run`) |
+
+`appsettings.Development.json` — `localhost` + **`POSTGRES_PUBLISH_PORT`** trong `.env.local` (vd. `5439`).
+
+---
+
+## Prod / CI
+
+Prod: `docker/docker-compose.prod.yml` + `docker/.env`, deploy **Dokploy**.  
+CI: [`.github/workflows/ci-cd.yml`](.github/workflows/ci-cd.yml) (không dùng Task).

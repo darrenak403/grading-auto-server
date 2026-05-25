@@ -1,76 +1,15 @@
-# Dev — full stack. Tạo docker/.env.local (xem .env.example), rồi: task docker:up
-# Hoặc: docker compose --env-file docker/.env.local -f docker/docker-compose.dev.yml up -d
+# Dev — env: docker/.env.local
+#   task docker:up        → infra (không build)
+#   task docker:build     → build image api + worker (profile app)
+#   task run / run:worker → app local (dotnet)
 
 services:
-  api:
-    container_name: grading-dev-api
-    image: ${DOCKER_REPO}/grading-system-api:${IMAGE_TAG}
-    build:
-      context: ..
-      dockerfile: GradingSystem.Api/Dockerfile
-    env_file: .env.local
-    depends_on:
-      postgres:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-    environment:
-      ASPNETCORE_ENVIRONMENT: Production
-      ASPNETCORE_URLS: ${ASPNETCORE_URLS}
-      ConnectionStrings__Postgres: 'Host=postgres;Port=5432;Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}'
-      Storage__BasePath: /storage
-      RabbitMQ__Host: rabbitmq://rabbitmq
-      RabbitMQ__Username: ${RABBITMQ_USER}
-      RabbitMQ__Password: ${RABBITMQ_PASSWORD}
-      Cors__AllowedOrigins__0: ${CORS_ORIGIN_0}
-      Cors__AllowedOrigins__1: ${CORS_ORIGIN_1}
-    ports:
-      - '${API_PORT}:8080'
-    volumes:
-      - ../storage:/storage
-    networks:
-      - grading_dev_net
-    restart: unless-stopped
-
-  worker:
-    container_name: grading-dev-worker
-    image: ${DOCKER_REPO}/grading-system-worker:${IMAGE_TAG}
-    build:
-      context: ..
-      dockerfile: GradingSystem.Worker/Dockerfile
-    env_file: .env.local
-    depends_on:
-      postgres:
-        condition: service_healthy
-      sqlserver:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-    environment:
-      ASPNETCORE_ENVIRONMENT: Production
-      ConnectionStrings__Postgres: 'Host=postgres;Port=5432;Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}'
-      ConnectionStrings__SqlServer: 'Server=sqlserver,1433;User Id=sa;Password=${SA_PASSWORD};TrustServerCertificate=true'
-      Storage__BasePath: /storage
-      RabbitMQ__Host: rabbitmq://rabbitmq
-      RabbitMQ__Username: ${RABBITMQ_USER}
-      RabbitMQ__Password: ${RABBITMQ_PASSWORD}
-      Worker__MaxConcurrentJobs: ${WORKER_MAX_CONCURRENT_JOBS}
-      Worker__PollIntervalSeconds: ${WORKER_POLL_INTERVAL_SECONDS}
-      Worker__ArtifactHealthCheckTimeoutSeconds: ${WORKER_ARTIFACT_HEALTH_TIMEOUT_SECONDS}
-      Worker__ArtifactPortRangeStart: ${WORKER_ARTIFACT_PORT_RANGE_START}
-      Worker__ArtifactPortRangeEnd: ${WORKER_ARTIFACT_PORT_RANGE_END}
-      Worker__BindHost: ${WORKER_BIND_HOST}
-      Worker__NewmanExecutable: ${WORKER_NEWMAN_EXECUTABLE:-}
-    volumes:
-      - ../storage:/storage
-    networks:
-      - grading_dev_net
-    restart: unless-stopped
-
   postgres:
+    image: postgres:17.5-alpine3.22
     container_name: grading-dev-postgres
-    image: postgres:16-alpine
-    env_file: .env.local
+    restart: unless-stopped
+    networks:
+      - grading-network
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
@@ -78,21 +17,34 @@ services:
     ports:
       - '${POSTGRES_PUBLISH_PORT:-5432}:5432'
     volumes:
-      - grading_dev_postgres_data:/var/lib/postgresql/data
-    networks:
-      - grading_dev_net
+      - pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}']
       interval: 10s
       timeout: 5s
       retries: 5
+
+  pgweb:
+    image: sosedoff/pgweb
+    container_name: grading-dev-pgweb
     restart: unless-stopped
+    networks:
+      - grading-network
+    environment:
+      DATABASE_URL: 'postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable'
+    ports:
+      - '${PGWEB_PORT:-8081}:8081'
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   sqlserver:
-    container_name: grading-dev-sqlserver
     image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: grading-dev-sqlserver
     platform: linux/amd64
-    env_file: .env.local
+    restart: unless-stopped
+    networks:
+      - grading-network
     environment:
       ACCEPT_EULA: 'Y'
       SA_PASSWORD: ${SA_PASSWORD}
@@ -100,9 +52,7 @@ services:
     ports:
       - '${SQLSERVER_PUBLISH_PORT:-1433}:1433'
     volumes:
-      - grading_dev_sqlserver_data:/var/opt/mssql
-    networks:
-      - grading_dev_net
+      - sqlserver-data:/var/opt/mssql
     healthcheck:
       test:
         [
@@ -113,12 +63,13 @@ services:
       timeout: 10s
       retries: 10
       start_period: 45s
-    restart: unless-stopped
 
   rabbitmq:
-    container_name: grading-dev-rabbitmq
     image: rabbitmq:3-management-alpine
-    env_file: .env.local
+    container_name: grading-dev-rabbitmq
+    restart: unless-stopped
+    networks:
+      - grading-network
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
@@ -126,42 +77,86 @@ services:
       - '${RABBITMQ_AMQP_PORT:-5672}:5672'
       - '${RABBITMQ_UI_PORT:-15672}:15672'
     volumes:
-      - grading_dev_rabbitmq_data:/var/lib/rabbitmq
-    networks:
-      - grading_dev_net
+      - rabbitmq-data:/var/lib/rabbitmq
     healthcheck:
       test: ['CMD', 'rabbitmq-diagnostics', 'ping']
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 20s
-    restart: unless-stopped
 
-  pgweb:
-    container_name: grading-dev-pgweb
-    profiles: [tools]
-    image: sosedoff/pgweb:latest
-    env_file: .env.local
+  api:
+    profiles: [app]
+    build:
+      context: ..
+      dockerfile: GradingSystem.Api/Dockerfile
+    image: ${DOCKER_REPO}/grading-system-api:${IMAGE_TAG:-latest}
+    pull_policy: never
+    container_name: grading-dev-api
+    restart: unless-stopped
+    ports:
+      - '${API_PORT:-5049}:8080'
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: ${ASPNETCORE_URLS:-http://+:8080}
+      ConnectionStrings__Postgres: 'Host=postgres;Port=5432;Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}'
+      Storage__BasePath: /storage
+      RabbitMQ__Host: rabbitmq://rabbitmq
+      RabbitMQ__Username: ${RABBITMQ_USER}
+      RabbitMQ__Password: ${RABBITMQ_PASSWORD}
+      Cors__AllowedOrigins__0: ${CORS_ORIGIN_0}
+      Cors__AllowedOrigins__1: ${CORS_ORIGIN_1}
+    volumes:
+      - ../storage:/storage
     depends_on:
       postgres:
         condition: service_healthy
-    environment:
-      DATABASE_URL: 'postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable'
-    ports:
-      - '${PGWEB_PORT:-8081}:8081'
+      rabbitmq:
+        condition: service_healthy
     networks:
-      - grading_dev_net
+      - grading-network
+
+  worker:
+    profiles: [app]
+    build:
+      context: ..
+      dockerfile: GradingSystem.Worker/Dockerfile
+    image: ${DOCKER_REPO}/grading-system-worker:${IMAGE_TAG:-latest}
+    pull_policy: never
+    container_name: grading-dev-worker
     restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__Postgres: 'Host=postgres;Port=5432;Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}'
+      ConnectionStrings__SqlServer: 'Server=sqlserver,1433;User Id=sa;Password=${SA_PASSWORD};TrustServerCertificate=true'
+      Storage__BasePath: /storage
+      RabbitMQ__Host: rabbitmq://rabbitmq
+      RabbitMQ__Username: ${RABBITMQ_USER}
+      RabbitMQ__Password: ${RABBITMQ_PASSWORD}
+      Worker__MaxConcurrentJobs: ${WORKER_MAX_CONCURRENT_JOBS:-3}
+      Worker__PollIntervalSeconds: ${WORKER_POLL_INTERVAL_SECONDS:-5}
+      Worker__ArtifactHealthCheckTimeoutSeconds: ${WORKER_ARTIFACT_HEALTH_TIMEOUT_SECONDS:-30}
+      Worker__ArtifactPortRangeStart: ${WORKER_ARTIFACT_PORT_RANGE_START:-7000}
+      Worker__ArtifactPortRangeEnd: ${WORKER_ARTIFACT_PORT_RANGE_END:-7999}
+      Worker__BindHost: ${WORKER_BIND_HOST:-127.0.0.1}
+      Worker__NewmanExecutable: ${WORKER_NEWMAN_EXECUTABLE:-}
+    volumes:
+      - ../storage:/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      sqlserver:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - grading-network
 
 volumes:
-  grading_dev_postgres_data:
-    name: grading_dev_postgres_data
-  grading_dev_sqlserver_data:
-    name: grading_dev_sqlserver_data
-  grading_dev_rabbitmq_data:
-    name: grading_dev_rabbitmq_data
+  pgdata:
+  sqlserver-data:
+  rabbitmq-data:
 
 networks:
-  grading_dev_net:
-    name: grading_dev_net
+  grading-network:
     driver: bridge

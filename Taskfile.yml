@@ -1,26 +1,59 @@
-# https://taskfile.dev/installation/  |  BE.md
+# Dev local — https://taskfile.dev/installation/  |  BE.md
 
 version: '3'
 
 vars:
-  COMPOSE_DEV: docker compose --env-file docker/.env.local -f docker/docker-compose.dev.yml
+  COMPOSE: docker compose --env-file docker/.env.local -f docker/docker-compose.dev.yml
+  COMPOSE_APP: '{{.COMPOSE}} --profile app'
   API_DIR: GradingSystem.Api
   WORKER_DIR: GradingSystem.Worker
 
 tasks:
   default:
-    desc: Gợi ý lệnh
+    desc: Gợi ý lệnh dev
     silent: true
     cmds:
       - task --list
       - |
         echo ""
-        echo "Docker:  docker/.env.local  ->  docker:build  ->  docker:up"
-        echo "Local:   docker:up (DB...)   ->  task run  +  task run:worker (2 terminal)"
+        echo "1. Tao docker/.env.local (xem docker/.env.example)"
+        echo "2. task docker:up"
+        echo "3. task run  +  task run:worker"
+        echo "Doi code image: task docker:build"
         echo "Doc: BE.md"
 
+  docker:build:
+    desc: Build image API + Worker (chạy lại khi đổi code)
+    deps: [_env:local]
+    cmds:
+      - mkdir -p storage
+      - '{{.COMPOSE_APP}} build'
+
+  docker:up:
+    desc: Infra Docker — Postgres, SQL Server, RabbitMQ, pgWeb (không build)
+    deps: [_env:local]
+    cmds:
+      - mkdir -p storage
+      - '{{.COMPOSE}} up -d --no-build'
+      - |
+        echo ""
+        echo "Postgres host port: xem POSTGRES_PUBLISH_PORT trong docker/.env.local"
+        echo "pgWeb:  http://localhost:8081"
+        echo "Rabbit: http://localhost:15672"
+        echo "App:    task run + task run:worker  ->  http://localhost:5049/swagger"
+
+  docker:down:
+    desc: Tắt infra Docker
+    deps: [_env:local]
+    cmd: '{{.COMPOSE}} down'
+
+  docker:logs:
+    desc: Log infra Docker
+    deps: [_env:local]
+    cmd: '{{.COMPOSE}} logs -f --tail=100'
+
   run:
-    desc: Chạy API local (dotnet) — http://localhost:5049/swagger
+    desc: API local — :5049/swagger
     dir: '{{.API_DIR}}'
     interactive: true
     env:
@@ -29,7 +62,7 @@ tasks:
     cmd: dotnet run
 
   run:worker:
-    desc: Chạy Worker local (dotnet)
+    desc: Worker local
     dir: '{{.WORKER_DIR}}'
     interactive: true
     env:
@@ -37,41 +70,8 @@ tasks:
       ASPNETCORE_ENVIRONMENT: Development
     cmd: dotnet run
 
-  docker:build:
-    desc: Build image API + Worker
-    deps: [_docker:require:local]
-    cmd: '{{.COMPOSE_DEV}} build api worker'
-
-  docker:up:
-    desc: Bật container (compose up -d)
-    deps: [_docker:require:local]
-    cmds:
-      - mkdir -p storage
-      - '{{.COMPOSE_DEV}} up -d'
-      - |
-        echo ""
-        echo "API:     http://localhost:5049/swagger"
-        echo "Rabbit:  http://localhost:15672"
-
-  docker:down:
-    desc: Tắt stack (giữ volume)
-    deps: [_docker:require:local]
-    cmd: '{{.COMPOSE_DEV}} stop'
-
-  docker:pull:
-    desc: Pull image từ registry
-    deps: [_docker:require:local]
-    cmd: '{{.COMPOSE_DEV}} pull'
-
-  docker:logs:
-    desc: Log tất cả service
-    deps: [_docker:require:local]
-    cmd: '{{.COMPOSE_DEV}} logs -f --tail=100'
-
-  # --- internal ---
-
-  _docker:require:local:
+  _env:local:
     internal: true
     preconditions:
       - sh: test -f docker/.env.local
-        msg: 'Thieu docker/.env.local — tao tay (tham khao docker/.env.example).'
+        msg: 'Thieu docker/.env.local — copy tu docker/.env.example'
