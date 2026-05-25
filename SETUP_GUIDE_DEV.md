@@ -49,8 +49,8 @@ dotnet tool install --global Microsoft.Playwright.CLI
 dotnet build -c Debug
 # macOS/Linux:
 ./bin/Debug/net8.0/playwright.sh install chromium
-# Windows (PowerShell):
-powershell -NoProfile -ExecutionPolicy Bypass -File .\bin\Debug\net8.0\playwright.ps1 install chromium
+# Windows (PowerShell) — dùng / hoặc \ đều được trong PowerShell:
+powershell -NoProfile -ExecutionPolicy Bypass -File ./bin/Debug/net8.0/playwright.ps1 install chromium
 ```
 
 > **Mac:** Nếu không có `playwright.sh`, cài PowerShell: `brew install powershell`, rồi chạy lại `task playwright:install`.
