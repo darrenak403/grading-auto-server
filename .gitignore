@@ -367,8 +367,7 @@ MigrationBackup/
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
 
-# dotenv environment variable files
-.env
+# dotenv — docker/.env (prod), docker/.env.local (dev); mẫu: docker/.env.example
 
 # Local task files
 tasks/
@@ -393,6 +392,8 @@ PE_PRN232_GivenSolution/
 .env
 .env.local
 .env.*.local
+docker/.env
+docker/.env.local
 appsettings.Production.json
 appsettings.Development.json.local
 

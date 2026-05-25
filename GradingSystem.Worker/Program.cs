@@ -28,6 +28,9 @@ builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.Configure<WorkerOptions>(
     builder.Configuration.GetSection("Worker"));
 
+builder.Services.Configure<PlaywrightOptions>(
+    builder.Configuration.GetSection("Playwright"));
+
 builder.Services.Configure<StorageCleanupOptions>(
     builder.Configuration.GetSection("StorageCleanup"));
 

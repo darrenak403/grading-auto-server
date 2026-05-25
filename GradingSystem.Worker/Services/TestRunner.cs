@@ -12,13 +12,17 @@ using Microsoft.Extensions.Options;
 
 namespace GradingSystem.Worker.Services;
 
-public class TestRunner(ILogger<TestRunner> logger, IOptions<WorkerOptions> workerOpts)
+public class TestRunner(
+    ILogger<TestRunner> logger,
+    IOptions<WorkerOptions> workerOpts,
+    IOptions<PlaywrightOptions> playwrightOpts)
 {
     private static readonly JsonSerializerOptions _jsonOpts =
         new(JsonSerializerDefaults.Web); // PropertyNameCaseInsensitive = true, no AOT issue
 
     private readonly NewmanLaunch? _newman = ResolveNewman(workerOpts.Value, logger);
     private readonly string _bindHost = workerOpts.Value.BindHost;
+    private readonly PlaywrightOptions _playwright = playwrightOpts.Value;
 
     public async Task RunAsync(GradingJob job, StudentContext ctx, IUnitOfWork uow, CancellationToken ct)
     {
@@ -639,11 +643,16 @@ public class TestRunner(ILogger<TestRunner> logger, IOptions<WorkerOptions> work
 
     // ── Q2: Playwright runner ──
 
+    private string PlaywrightTestHost =>
+        string.IsNullOrWhiteSpace(_playwright.BrowserCdpEndpoint)
+            ? _bindHost
+            : _playwright.ArtifactHostFromBrowser;
+
     private async Task<List<TestCaseResult>> RunPlaywrightCasesAsync(
         List<TestCase> testCases, int port, CancellationToken ct)
     {
         using var playwright = await Playwright.CreateAsync();
-        await using var browser = await playwright.Chromium.LaunchAsync(new() { Headless = true });
+        await using var browser = await ConnectOrLaunchBrowserAsync(playwright);
         await using var browserContext = await browser.NewContextAsync();
         var apiContext = browserContext.APIRequest;
 
@@ -656,13 +665,25 @@ public class TestRunner(ILogger<TestRunner> logger, IOptions<WorkerOptions> work
         return results;
     }
 
+    private async Task<IBrowser> ConnectOrLaunchBrowserAsync(IPlaywright playwright)
+    {
+        var cdp = _playwright.BrowserCdpEndpoint?.Trim();
+        if (!string.IsNullOrEmpty(cdp))
+        {
+            logger.LogInformation("Playwright: connecting over CDP to {Endpoint}", cdp);
+            return await playwright.Chromium.ConnectOverCDPAsync(cdp);
+        }
+
+        return await playwright.Chromium.LaunchAsync(new() { Headless = true });
+    }
+
     private async Task<TestCaseResult> RunPlaywrightTestCaseAsync(
         TestCase tc, int port,
         IBrowserContext browserContext, IAPIRequestContext apiContext,
         Dictionary<string, string> context, CancellationToken ct)
     {
         var urlPath = InterpolateVariables(tc.UrlTemplate, context);
-        var url = $"http://{_bindHost}:{port}{urlPath}";
+        var url = $"http://{PlaywrightTestHost}:{port}{urlPath}";
         var inputJson = tc.InputJson != null ? InterpolateVariables(tc.InputJson, context) : null;
 
         var expect = DeserializeExpect(tc.ExpectJson);

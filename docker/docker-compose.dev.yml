@@ -1,7 +1,14 @@
+# Dev — full stack. Tạo docker/.env.local (xem .env.example), rồi: task docker:up
+# Hoặc: docker compose --env-file docker/.env.local -f docker/docker-compose.dev.yml up -d
+
 services:
   api:
-    container_name: grading-api
+    container_name: grading-dev-api
     image: ${DOCKER_REPO}/grading-system-api:${IMAGE_TAG}
+    build:
+      context: ..
+      dockerfile: GradingSystem.Api/Dockerfile
+    env_file: .env.local
     depends_on:
       postgres:
         condition: service_healthy
@@ -20,25 +27,18 @@ services:
     ports:
       - '${API_PORT}:8080'
     volumes:
-      - grading_storage_data:/storage
+      - ../storage:/storage
     networks:
-      - grading_net
-    restart: unless-stopped
-
-  fe:
-    container_name: grading-fe
-    image: ${DOCKER_REPO}/grading-system-fe:${IMAGE_TAG}
-    depends_on:
-      - api
-    ports:
-      - '${FE_PORT:-3000}:3000'
-    networks:
-      - grading_net
+      - grading_dev_net
     restart: unless-stopped
 
   worker:
-    container_name: grading-worker
+    container_name: grading-dev-worker
     image: ${DOCKER_REPO}/grading-system-worker:${IMAGE_TAG}
+    build:
+      context: ..
+      dockerfile: GradingSystem.Worker/Dockerfile
+    env_file: .env.local
     depends_on:
       postgres:
         condition: service_healthy
@@ -59,25 +59,28 @@ services:
       Worker__ArtifactHealthCheckTimeoutSeconds: ${WORKER_ARTIFACT_HEALTH_TIMEOUT_SECONDS}
       Worker__ArtifactPortRangeStart: ${WORKER_ARTIFACT_PORT_RANGE_START}
       Worker__ArtifactPortRangeEnd: ${WORKER_ARTIFACT_PORT_RANGE_END}
+      Worker__BindHost: ${WORKER_BIND_HOST}
+      Worker__NewmanExecutable: ${WORKER_NEWMAN_EXECUTABLE:-}
     volumes:
-      - grading_storage_data:/storage
+      - ../storage:/storage
     networks:
-      - grading_net
+      - grading_dev_net
     restart: unless-stopped
 
   postgres:
-    container_name: grading-postgres
+    container_name: grading-dev-postgres
     image: postgres:16-alpine
+    env_file: .env.local
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
-      - '${POSTGRES_PUBLISH_PORT}:5432'
+      - '${POSTGRES_PUBLISH_PORT:-5432}:5432'
     volumes:
-      - grading_postgres_data:/var/lib/postgresql/data
+      - grading_dev_postgres_data:/var/lib/postgresql/data
     networks:
-      - grading_net
+      - grading_dev_net
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}']
       interval: 10s
@@ -86,19 +89,20 @@ services:
     restart: unless-stopped
 
   sqlserver:
-    container_name: grading-sqlserver
+    container_name: grading-dev-sqlserver
     image: mcr.microsoft.com/mssql/server:2022-latest
     platform: linux/amd64
+    env_file: .env.local
     environment:
       ACCEPT_EULA: 'Y'
       SA_PASSWORD: ${SA_PASSWORD}
       MSSQL_PID: Express
     ports:
-      - '${SQLSERVER_PUBLISH_PORT}:1433'
+      - '${SQLSERVER_PUBLISH_PORT:-1433}:1433'
     volumes:
-      - grading_sqlserver_data:/var/opt/mssql
+      - grading_dev_sqlserver_data:/var/opt/mssql
     networks:
-      - grading_net
+      - grading_dev_net
     healthcheck:
       test:
         [
@@ -112,18 +116,19 @@ services:
     restart: unless-stopped
 
   rabbitmq:
-    container_name: grading-rabbitmq
+    container_name: grading-dev-rabbitmq
     image: rabbitmq:3-management-alpine
+    env_file: .env.local
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
     ports:
-      - '${RABBITMQ_AMQP_PORT}:5672'
-      - '${RABBITMQ_UI_PORT}:15672'
+      - '${RABBITMQ_AMQP_PORT:-5672}:5672'
+      - '${RABBITMQ_UI_PORT:-15672}:15672'
     volumes:
-      - grading_rabbitmq_data:/var/lib/rabbitmq
+      - grading_dev_rabbitmq_data:/var/lib/rabbitmq
     networks:
-      - grading_net
+      - grading_dev_net
     healthcheck:
       test: ['CMD', 'rabbitmq-diagnostics', 'ping']
       interval: 10s
@@ -133,31 +138,30 @@ services:
     restart: unless-stopped
 
   pgweb:
-    container_name: grading-pgweb
+    container_name: grading-dev-pgweb
     profiles: [tools]
     image: sosedoff/pgweb:latest
+    env_file: .env.local
     depends_on:
       postgres:
         condition: service_healthy
     environment:
       DATABASE_URL: 'postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable'
     ports:
-      - '${PGWEB_PORT}:8081'
+      - '${PGWEB_PORT:-8081}:8081'
     networks:
-      - grading_net
+      - grading_dev_net
     restart: unless-stopped
 
 volumes:
-  grading_postgres_data:
-    name: grading_postgres_data
-  grading_sqlserver_data:
-    name: grading_sqlserver_data
-  grading_rabbitmq_data:
-    name: grading_rabbitmq_data
-  grading_storage_data:
-    name: grading_storage_data
+  grading_dev_postgres_data:
+    name: grading_dev_postgres_data
+  grading_dev_sqlserver_data:
+    name: grading_dev_sqlserver_data
+  grading_dev_rabbitmq_data:
+    name: grading_dev_rabbitmq_data
 
 networks:
-  grading_net:
-    name: grading_net
+  grading_dev_net:
+    name: grading_dev_net
     driver: bridge
