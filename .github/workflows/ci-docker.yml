@@ -1,7 +1,7 @@
-# Build & push grading-system-api / grading-system-worker to Docker Hub.
-# VPS: docker compose -f docker/docker-compose.prod.yml (xem docker/README.md).
+# CI: build & push API + Worker images to Docker Hub.
+# CD: Dokploy trên VPS pull image và deploy (không qua GitHub Actions).
 
-name: CD — Docker images
+name: CI — Docker images
 
 on:
   push:
@@ -9,12 +9,12 @@ on:
   workflow_dispatch:
     inputs:
       force_all:
-        description: Build cả API và Worker
+        description: Build cả API và Worker (bỏ qua path filter)
         type: boolean
         default: true
 
 concurrency:
-  group: cd-docker-${{ github.ref }}
+  group: ci-docker-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -42,6 +42,7 @@ jobs:
               - 'GradingSystem.Infrastructure/**'
               - 'Project.sln'
               - 'GradingSystem.slnx'
+              - '.github/workflows/ci-docker.yml'
             worker:
               - 'GradingSystem.Worker/**'
               - 'GradingSystem.Worker/Dockerfile'
@@ -50,9 +51,10 @@ jobs:
               - 'GradingSystem.Infrastructure/**'
               - 'Project.sln'
               - 'GradingSystem.slnx'
+              - '.github/workflows/ci-docker.yml'
 
   build-api:
-    name: Build API
+    name: Build & push API
     needs: changes
     runs-on: ubuntu-latest
     if: >-
@@ -83,7 +85,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=api
 
   build-worker:
-    name: Build Worker
+    name: Build & push Worker
     needs: changes
     runs-on: ubuntu-latest
     if: >-
@@ -120,12 +122,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: |
-          echo "## CD Docker" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Service | Path changed | Build job |" >> "$GITHUB_STEP_SUMMARY"
-          echo "|---------|--------------|-----------|" >> "$GITHUB_STEP_SUMMARY"
-          echo "| API | ${{ needs.changes.outputs.api }} | ${{ needs.build-api.result }} |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Worker | ${{ needs.changes.outputs.worker }} | ${{ needs.build-worker.result }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "## CI — Docker Hub" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Image | Path changed | Job |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-------|--------------|-----|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| grading-system-api | ${{ needs.changes.outputs.api }} | ${{ needs.build-api.result }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| grading-system-worker | ${{ needs.changes.outputs.worker }} | ${{ needs.build-worker.result }} |" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "Images: \`${{ secrets.DOCKER_USERNAME }}/grading-system-{api,worker}:latest\` và tag \`${{ github.sha }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "Tags: \`:latest\`, \`:${{ github.sha }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "VPS: \`docker compose --env-file docker/.env -f docker/docker-compose.prod.yml pull && ... up -d\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "Deploy VPS: **Dokploy** pull từ Docker Hub (không deploy trong workflow này)." >> "$GITHUB_STEP_SUMMARY"

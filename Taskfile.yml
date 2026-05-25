@@ -4,7 +4,6 @@ version: '3'
 
 vars:
   COMPOSE_DEV: docker compose --env-file docker/.env.local -f docker/docker-compose.dev.yml
-  COMPOSE_PROD: docker compose --env-file docker/.env -f docker/docker-compose.prod.yml
   API_DIR: GradingSystem.Api
   WORKER_DIR: GradingSystem.Worker
 
@@ -18,7 +17,6 @@ tasks:
         echo ""
         echo "Docker:  docker/.env.local  ->  docker:build  ->  docker:up"
         echo "Local:   docker:up (DB...)   ->  task run  +  task run:worker (2 terminal)"
-        echo "Prod:    docker/.env  ->  task docker:prod:up"
         echo "Doc: BE.md"
 
   run:
@@ -40,12 +38,12 @@ tasks:
     cmd: dotnet run
 
   docker:build:
-    desc: Dev — build image API + Worker
+    desc: Build image API + Worker
     deps: [_docker:require:local]
     cmd: '{{.COMPOSE_DEV}} build api worker'
 
   docker:up:
-    desc: Dev — bật container (compose up -d)
+    desc: Bật container (compose up -d)
     deps: [_docker:require:local]
     cmds:
       - mkdir -p storage
@@ -56,36 +54,19 @@ tasks:
         echo "Rabbit:  http://localhost:15672"
 
   docker:down:
-    desc: Dev — tắt stack (giữ volume)
+    desc: Tắt stack (giữ volume)
     deps: [_docker:require:local]
     cmd: '{{.COMPOSE_DEV}} stop'
 
   docker:pull:
-    desc: Dev — pull image từ registry
+    desc: Pull image từ registry
     deps: [_docker:require:local]
     cmd: '{{.COMPOSE_DEV}} pull'
 
   docker:logs:
-    desc: Dev — log tất cả service
+    desc: Log tất cả service
     deps: [_docker:require:local]
     cmd: '{{.COMPOSE_DEV}} logs -f --tail=100'
-
-  docker:prod:up:
-    desc: Prod/VPS — pull + bật stack
-    deps: [_docker:require:prod]
-    cmds:
-      - '{{.COMPOSE_PROD}} pull'
-      - '{{.COMPOSE_PROD}} up -d'
-
-  docker:prod:down:
-    desc: Prod — tắt stack
-    deps: [_docker:require:prod]
-    cmd: '{{.COMPOSE_PROD}} stop'
-
-  docker:prod:pull:
-    desc: Prod — pull image
-    deps: [_docker:require:prod]
-    cmd: '{{.COMPOSE_PROD}} pull'
 
   # --- internal ---
 
@@ -94,9 +75,3 @@ tasks:
     preconditions:
       - sh: test -f docker/.env.local
         msg: 'Thieu docker/.env.local — tao tay (tham khao docker/.env.example).'
-
-  _docker:require:prod:
-    internal: true
-    preconditions:
-      - sh: test -f docker/.env
-        msg: 'Thieu docker/.env — tao tay (tham khao docker/.env.example).'

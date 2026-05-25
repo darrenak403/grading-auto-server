@@ -2,29 +2,18 @@
 
 Tổng quan: [`README.md`](README.md). FE **repo riêng**.
 
----
-
-## Cấu hình
-
-Tự tạo env (tham khảo `docker/.env.example`):
-
-| Môi trường | File |
-|------------|------|
-| Dev | `docker/.env.local` |
-| Prod | `docker/.env` |
-
-`CORS_ORIGIN_*` trỏ URL FE (vd. `http://localhost:3000`).
+Tạo `docker/.env.local` tay (mẫu: `docker/.env.example`). `CORS_ORIGIN_*` trỏ URL FE.
 
 ---
 
-## Dev — Docker (API + Worker trong container)
+## Docker (API + Worker trong container)
 
 ```bash
 task docker:build    # sau khi sửa code C#
-task docker:up       # bật container
+task docker:up
 ```
 
-Lần đầu / image trên registry: `task docker:pull` rồi `docker:up`.
+Image từ registry: `task docker:pull` → `task docker:up`.
 
 | URL | Mặc định |
 |-----|----------|
@@ -35,46 +24,39 @@ Lần đầu / image trên registry: `task docker:pull` rồi `docker:up`.
 
 ---
 
-## Dev — Local (dotnet trên máy)
-
-DB/RabbitMQ/SQL Server vẫn qua Docker:
+## Local (dotnet trên máy)
 
 ```bash
 task docker:up
 docker compose --env-file docker/.env.local -f docker/docker-compose.dev.yml stop api worker
 ```
 
-Hai terminal:
-
-```bash
-task run
-task run:worker
-```
+Hai terminal: `task run` · `task run:worker`
 
 Swagger: http://localhost:5049/swagger
-
-`appsettings.Development.json` trỏ `localhost` + port trong `.env.local`.
 
 ---
 
 ## Sau khi sửa code
 
-| Cách chạy | Lệnh |
-|-----------|------|
+| Cách | Lệnh |
+|------|------|
 | Docker | `task docker:build` → `task docker:up` |
 | Local | Restart `task run` / `task run:worker` |
 
-Chỉ đổi image từ registry: `task docker:pull` → `task docker:up`.
+Pull image mới: `task docker:pull` → `task docker:up`
 
 ---
 
-## Prod / VPS
+## CI / CD
 
-```bash
-task docker:prod:up
-```
+| Bước | Công cụ |
+|------|---------|
+| CI (push `main`) | GitHub Actions [`.github/workflows/ci-docker.yml`](.github/workflows/ci-docker.yml) — build/push Docker Hub |
+| CD (VPS) | **Dokploy** — pull image và deploy |
 
-(`docker/.env` tạo tay từ `.env.example`)
+Secrets repo CI: `DOCKER_USERNAME`, `DOCKER_PASSWORD`.  
+Image: `{DOCKER_USERNAME}/grading-system-{api,worker}:latest` (và `:sha`).
 
 ---
 
@@ -82,8 +64,7 @@ task docker:prod:up
 
 | Lệnh | Mô tả |
 |------|--------|
-| `run` | API local (`dotnet run`) |
+| `run` | API local |
 | `run:worker` | Worker local |
-| `docker:build` | Build image API + Worker |
-| `docker:up` / `docker:down` / `docker:pull` / `docker:logs` | Container dev |
-| `docker:prod:up` / `docker:prod:down` / `docker:prod:pull` | Prod |
+| `docker:build` | Build image |
+| `docker:up` / `docker:down` / `docker:pull` / `docker:logs` | Container |
