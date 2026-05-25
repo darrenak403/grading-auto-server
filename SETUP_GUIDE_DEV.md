@@ -20,17 +20,18 @@ IDE khuyên dùng: Visual Studio 2022, JetBrains Rider, hoặc VS Code.
 Tại thư mục `be`:
 
 ```bash
-# Lần đầu (env + Docker infra + Playwright + migrate DB)
-task setup
+# Lần đầu (restore + infra + Playwright + migrate) — xem RUN_FOR_DEV.md
+task dev:setup
 
-# Mỗi ngày — 2 terminal
-task api      # terminal 1 → http://localhost:5049/swagger
-task worker   # terminal 2
+# Mỗi ngày
+task dev:up
+task dev:api      # terminal 1 → http://localhost:5049/swagger
+task dev:worker   # terminal 2
 ```
 
-Nếu Docker vừa tắt: `task infra:up` trước khi chạy api/worker.
+Chi tiết: [`RUN_FOR_DEV.md`](RUN_FOR_DEV.md). Nếu Docker vừa tắt: `task dev:up` trước api/worker.
 
-### 2.1. Playwright lỗi khi `task setup`?
+### 2.1. Playwright lỗi khi `task dev:setup`?
 
 Worker dùng **Playwright** (.NET). Bắt buộc **build project trước**, rồi mới cài Chromium.
 
@@ -38,7 +39,7 @@ Chạy lại riêng bước Playwright:
 
 ```bash
 cd be
-task playwright:install
+task _dev:playwright
 ```
 
 Hoặc thủ công:
@@ -53,7 +54,7 @@ dotnet build -c Debug
 powershell -NoProfile -ExecutionPolicy Bypass -File ./bin/Debug/net8.0/playwright.ps1 install chromium
 ```
 
-> **Mac:** Nếu không có `playwright.sh`, cài PowerShell: `brew install powershell`, rồi chạy lại `task playwright:install`.
+> **Mac:** Nếu không có `playwright.sh`, cài PowerShell: `brew install powershell`, rồi chạy lại `task _dev:playwright`.
 
 > **Windows:** Đảm bảo `%USERPROFILE%\.dotnet\tools` có trong PATH (mở terminal mới sau khi cài .NET SDK).
 
