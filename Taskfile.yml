@@ -1,4 +1,7 @@
-# task --list
+# Taskfile — PRN232 Auto Grader
+# Cài Task: https://taskfile.dev/installation/
+# Xem lệnh: task  |  task --list-all (kèm task nội bộ)
+
 version: '3'
 
 dotenv: ['.env']
@@ -6,103 +9,192 @@ dotenv: ['.env']
 vars:
   COMPOSE_DEV: docker compose -f docker-compose.dev.yml
   COMPOSE_PROD: docker compose -f docker-compose.prod.yml
+  SOLUTION: Project.sln
   API_DIR: GradingSystem.Api
   WORKER_DIR: GradingSystem.Worker
   INFRA_PROJECT: GradingSystem.Infrastructure
 
 tasks:
   default:
-    desc: Danh sách lệnh
-    cmd: task --list
+    desc: Gợi ý lệnh thường dùng
     silent: true
-
-  # Dev — lần đầu
-  setup:
-    desc: Thiết lập dev lần đầu (env + infra + Playwright + migrate)
     cmds:
-      - task: env
-      - task: infra:up
-      - task: playwright:install
-      - task: db:migrate
+      - |
+        echo "Developer (cần .env + .NET SDK):"
+        echo "  task dev:setup   — lần đầu"
+        echo "  task dev:up      — hằng ngày: bật DB/RabbitMQ"
+        echo "  task dev:api     — terminal 1"
+        echo "  task dev:worker  — terminal 2"
+        echo "  task dev:down    — tắt infra (giữ data)"
+        echo ""
+        echo "User / giảng viên (chỉ Docker):"
+        echo "  task user:setup  — lần đầu"
+        echo "  task user:up     — hằng ngày"
+        echo "  task user:down   — tắt stack (giữ data)"
+        echo ""
+        echo "Chi tiết: RUN_FOR_DEV.md | RUN_FOR_USER.md"
 
-  # Dev — hằng ngày
-  infra:up:
-    desc: Bật Postgres, SQL Server, RabbitMQ
-    deps: [env]
-    cmd: '{{.COMPOSE_DEV}} up -d'
+  # ═══════════════════════════════════════════════════════════
+  # DEVELOPER — infra Docker + API/Worker chạy trên máy
+  # ═══════════════════════════════════════════════════════════
 
-  api:
-    desc: Chạy API → http://localhost:5049/swagger
+  dev:setup:
+    desc: '[Dev] Setup lần đầu (.env có sẵn) — restore, infra, Playwright, migrate'
+    cmds:
+      - task: _dev:restore
+      - mkdir -p storage
+      - task: _dev:infra-up
+      - task: _dev:infra-wait
+      - task: _dev:playwright
+      - task: _dev:migrate
+      - echo 'Xong. Hằng ngày - task dev:up, dev:api, dev:worker'
+
+  dev:up:
+    desc: '[Dev] Hằng ngày — bật Postgres, SQL Server, RabbitMQ'
+    cmds:
+      - task: _dev:infra-up
+      - echo 'Đợi ~1 phút - task dev:api (T1) + task dev:worker (T2)'
+
+  dev:down:
+    desc: '[Dev] Tắt infra (giữ dữ liệu DB trong volume)'
+    cmds:
+      - '{{.COMPOSE_DEV}} stop'
+
+  dev:kill:
+    desc: '[Dev] Dừng API/Worker trên máy (trước khi build lại — tránh MSB3027)'
+    cmds:
+      - |
+        if command -v taskkill >/dev/null 2>&1; then
+          taskkill //F //IM GradingSystem.Api.exe 2>/dev/null || true
+          taskkill //F //IM GradingSystem.Worker.exe 2>/dev/null || true
+        else
+          pkill -f 'GradingSystem.Api' 2>/dev/null || true
+          pkill -f 'GradingSystem.Worker' 2>/dev/null || true
+        fi
+        echo "Đã dừng API/Worker (nếu đang chạy)."
+
+  dev:build:
+    desc: '[Dev] Dừng API/Worker rồi build solution'
+    cmds:
+      - task: dev:kill
+      - dotnet build {{.SOLUTION}} -c Debug
+
+  dev:api:
+    desc: '[Dev] Chạy API — http://localhost:5049/swagger'
     dir: '{{.API_DIR}}'
     interactive: true
-    cmd: dotnet run
+    env:
+      # .env dành cho Docker; dotnet run mặc định Production nếu không set
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://localhost:5049
+    cmds:
+      - dotnet run
 
-  worker:
-    desc: Chạy Worker chấm điểm
+  dev:worker:
+    desc: '[Dev] Chạy Worker chấm điểm'
     dir: '{{.WORKER_DIR}}'
     interactive: true
-    cmd: dotnet run
-
-  db:migrate:
-    desc: Migrate DB (sau khi pull code mới)
-    dir: '{{.API_DIR}}'
-    deps: [env]
-    cmd: dotnet ef database update --project ../{{.INFRA_PROJECT}} --startup-project .
-
-  playwright:install:
-    desc: Cài Playwright + Chromium (chạy lại nếu setup lỗi)
+    env:
+      DOTNET_ENVIRONMENT: Development
+      ASPNETCORE_ENVIRONMENT: Development
     cmds:
-      - dotnet tool install --global Microsoft.Playwright.CLI
-      - task: _playwright:build
-      - task: _playwright:browsers:unix
-      - task: _playwright:browsers:win
+      - dotnet run
 
-  # Người dùng — full Docker, không cần .NET
-  prod:up:
-    desc: Chạy full stack (FE + API + Worker + DB)
-    deps: [env]
-    cmd: '{{.COMPOSE_PROD}} up -d'
+  dev:reset:
+    desc: '[Dev] Xóa toàn bộ data dev (volume) rồi migrate lại — không cài lại Playwright'
+    prompt: Xóa hết database dev và migrate lại?
+    cmds:
+      - '{{.COMPOSE_DEV}} down -v'
+      - task: _dev:infra-up
+      - task: _dev:infra-wait
+      - task: _dev:migrate
 
-  prod:down:
-    desc: Dừng full stack
-    cmd: '{{.COMPOSE_PROD}} down'
+  # ═══════════════════════════════════════════════════════════
+  # USER — full stack trong Docker (FE + API + Worker + DB)
+  # ═══════════════════════════════════════════════════════════
 
-  # --- internal ---
+  user:setup:
+    desc: '[User] Setup lần đầu (.env có sẵn) — pull & chạy full stack'
+    cmds:
+      - task: _user:stack-up
+      - echo 'Đợi 2-3 phút - http://localhost:3000'
 
-  env:
+  user:up:
+    desc: '[User] Hằng ngày — bật full stack'
+    cmds:
+      - task: _user:stack-up
+      - echo 'Đợi 1-2 phút - http://localhost:3000'
+
+  user:down:
+    desc: '[User] Tắt stack (giữ dữ liệu)'
+    cmds:
+      - '{{.COMPOSE_PROD}} down'
+
+  # ═══════════════════════════════════════════════════════════
+  # Nội bộ (task --list-all)
+  # ═══════════════════════════════════════════════════════════
+
+  _dev:restore:
+    internal: true
+    cmds:
+      - dotnet restore {{.SOLUTION}}
+
+  _dev:infra-up:
+    internal: true
+    cmds:
+      - '{{.COMPOSE_DEV}} up -d'
+
+  _dev:infra-wait:
     internal: true
     cmds:
       - |
-        if [ ! -f .env ]; then cp .env.example .env; fi
-    status:
-      - test -f .env
+        echo "Đợi PostgreSQL..."
+        for i in $(seq 1 60); do
+          if {{.COMPOSE_DEV}} exec -T postgres pg_isready -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-grading_system}" >/dev/null 2>&1; then
+            echo "PostgreSQL ready."
+            exit 0
+          fi
+          sleep 2
+        done
+        echo "PostgreSQL chưa sẵn sàng. Kiểm tra: {{.COMPOSE_DEV}} ps"
+        exit 1
 
-  _playwright:build:
+  _dev:migrate:
     internal: true
-    dir: '{{.WORKER_DIR}}'
+    dir: '{{.API_DIR}}'
+    env:
+      ASPNETCORE_ENVIRONMENT: Development
     cmds:
-      - dotnet restore
-      - dotnet build -c Debug
+      - >-
+        dotnet ef database update
+        --project ../{{.INFRA_PROJECT}}
+        --startup-project .
 
-  _playwright:browsers:unix:
+  _dev:playwright:
     internal: true
-    dir: '{{.WORKER_DIR}}'
-    deps: [_playwright:build]
-    platforms: [darwin, linux]
     cmds:
+      - dotnet tool install --global Microsoft.Playwright.CLI || dotnet tool update --global Microsoft.Playwright.CLI
       - |
         set -e
-        if [ -f ./bin/Debug/net8.0/playwright.sh ]; then
-          ./bin/Debug/net8.0/playwright.sh install chromium
-        elif command -v pwsh >/dev/null 2>&1; then
-          pwsh -NoProfile -File ./bin/Debug/net8.0/playwright.ps1 install chromium
+        SCRIPT="./bin/Debug/net8.0/playwright.sh"
+        PS1="./bin/Debug/net8.0/playwright.ps1"
+        if [ -f "$SCRIPT" ]; then
+          "$SCRIPT" install chromium
+        elif command -v pwsh >/dev/null 2>&1 && [ -f "$PS1" ]; then
+          pwsh -NoProfile -File "$PS1" install chromium
+        elif command -v playwright >/dev/null 2>&1; then
+          playwright install chromium
+        elif [ -x "$HOME/.dotnet/tools/playwright" ]; then
+          "$HOME/.dotnet/tools/playwright" install chromium
+        elif [ -f "$USERPROFILE/.dotnet/tools/playwright.cmd" ]; then
+          "$USERPROFILE/.dotnet/tools/playwright.cmd" install chromium
         else
-          playwright install chromium || "$HOME/.dotnet/tools/playwright" install chromium
+          echo "Không tìm thấy playwright CLI sau khi cài tool."
+          exit 1
         fi
 
-  _playwright:browsers:win:
+  _user:stack-up:
     internal: true
-    dir: '{{.WORKER_DIR}}'
-    deps: [_playwright:build]
-    platforms: [windows]
-    cmd: powershell -NoProfile -ExecutionPolicy Bypass -File ./bin/Debug/net8.0/playwright.ps1 install chromium
+    cmds:
+      - '{{.COMPOSE_PROD}} pull'
+      - '{{.COMPOSE_PROD}} up -d'

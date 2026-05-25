@@ -74,12 +74,14 @@ Hệ thống chấm thi tự động cho môn PRN232 (lập trình ASP.NET). H�
 
 ## Yêu cầu hệ thống
 
-- **Docker Desktop** >= 24.x
+- **Docker Desktop** >= 24.x (bật trước khi chạy compose)
 - **Docker Compose** >= 2.x
-- **.NET SDK 8.0** (nếu chạy không dùng Docker)
-- **Node.js >= 18** (nếu chạy frontend không dùng Docker)
+- **.NET SDK 8.0+** (dev: chạy API/Worker trên máy)
+- **[Task](https://taskfile.dev/)** (tùy chọn, khuyến nghị cho lệnh setup)
 - RAM tối thiểu: **4 GB** (khuyến nghị 8 GB)
 - Disk: **10 GB** trống
+
+Dev local: [`RUN_FOR_DEV.md`](RUN_FOR_DEV.md) · User (Docker full stack): [`RUN_FOR_USER.md`](RUN_FOR_USER.md)
 
 ---
 
@@ -97,116 +99,78 @@ Chỉnh sửa `.env` theo môi trường của bạn (xem phần [Biến môi tr
 
 ### Chế độ Development
 
-Trong chế độ dev, chỉ chạy **infrastructure** bằng Docker. API, Worker và Frontend chạy trực tiếp trên máy.
+Trong chế độ dev, chỉ chạy **infrastructure** bằng Docker. **API** và **Worker** chạy trực tiếp trên máy (`dotnet run`). Repo này không chứa mã frontend — UI web lấy từ image Docker khi deploy production.
 
-**Bước 1 — Khởi động infrastructure:**
+Cần `.env` trước (`cp .env.example .env`). Chi tiết: [`RUN_FOR_DEV.md`](RUN_FOR_DEV.md).
+
+| Giai đoạn | Lệnh |
+|-----------|------|
+| Lần đầu | `task dev:setup` |
+| Hằng ngày | `task dev:up` → `task dev:api` + `task dev:worker` |
+| Tắt | `task dev:down` |
+
+**Thủ công — infrastructure:**
 
 ```bash
 docker compose -f docker-compose.dev.yml up -d
 ```
 
-Các service sẽ khởi động:
 | Service | Port | Ghi chú |
 |---------|------|---------|
 | PostgreSQL 16 | 5432 | DB chính |
 | SQL Server 2022 | 1433 | DB Q1 sinh viên |
 | RabbitMQ | 5672 (AMQP), 15672 (UI) | Message broker |
-| pgWeb (tùy chọn) | 8081 | Xem DB trực quan |
+| pgWeb (profile `tools`) | 8081 | `docker compose -f docker-compose.dev.yml --profile tools up -d` |
 
-RabbitMQ Management UI: http://localhost:15672 (guest/guest)
+RabbitMQ Management UI: http://localhost:15672 — đăng nhập theo `RABBITMQ_USER` / `RABBITMQ_PASSWORD` trong `.env` (mặc định `grading` / `grading_pass`).
 
-**Bước 2 — Chạy Backend API:**
-
-```bash
-cd be/GradingSystem.Api
-dotnet run
-# API chạy tại http://localhost:5049
-# Swagger UI: http://localhost:5049/swagger
-```
-
-**Bước 3 — Chạy Worker:**
-
-```bash
-cd be/GradingSystem.Worker
-dotnet run
-```
-
-**Bước 4 — Chạy Frontend:**
-
-```bash
-cd fe/grading-system
-npm install
-npm run dev
-# Frontend chạy tại http://localhost:3000
-```
-
-**Bước 5 — Migrate database (lần đầu):**
-
-```bash
-cd be/GradingSystem.Api
-dotnet ef database update
-```
+Sau khi xóa volume dev: `task dev:reset` (xem [`RUN_FOR_DEV.md`](RUN_FOR_DEV.md)).
 
 ---
 
 ### Chế độ Production
 
-Chạy toàn bộ stack bằng Docker Compose:
+Chỉ Docker — xem [`RUN_FOR_USER.md`](RUN_FOR_USER.md).
 
-```bash
-docker compose -f docker-compose.prod.yml up -d --build
-```
+| Giai đoạn | Lệnh |
+|-----------|------|
+| Lần đầu | `task user:setup` |
+| Hằng ngày | `task user:up` |
+| Tắt | `task user:down` |
 
-| Service     | Port  | URL                           |
-| ----------- | ----- | ----------------------------- |
-| Frontend    | 3000  | http://localhost:3000         |
-| API         | 8080  | http://localhost:8080/swagger |
-| RabbitMQ UI | 15672 | http://localhost:15672        |
-| pgWeb       | 8081  | http://localhost:8081         |
+| Service     | Port (mặc định `.env`) | URL |
+| ----------- | ---------------------- | --- |
+| Frontend    | 3000                   | http://localhost:3000 |
+| API         | 5049 → container 8080  | http://localhost:5049/swagger |
+| RabbitMQ UI | 15672                  | http://localhost:15672 |
+| pgWeb       | 8081                   | http://localhost:8081 |
 
-Dừng toàn bộ:
-
-```bash
-docker compose -f docker-compose.prod.yml down
-```
+Dừng: `task user:down`
 
 ---
 
 ## Cấu trúc thư mục
 
 ```
-Project/
-├── be/                                  # Backend (.NET 8)
-│   ├── GradingSystem.Api/               # ASP.NET Core Web API
-│   │   ├── Controllers/                 # 9 controllers (Assignment, Submission, ...)
-│   │   ├── appsettings.json             # Cấu hình DB, RabbitMQ
-│   │   └── Program.cs                   # Startup / DI
-│   ├── GradingSystem.Worker/            # Background worker service
-│   │   └── Services/
-│   │       ├── GradingPipeline.cs       # Pipeline chấm thi chính
-│   │       ├── ArtifactRunner.cs        # Chạy artifact sinh viên
-│   │       └── TestRunner.cs            # Gọi HTTP test cases
-│   ├── GradingSystem.Application/       # Business logic, DTOs, interfaces
-│   ├── GradingSystem.Domain/            # Entities (Assignment, Submission, ...)
-│   └── GradingSystem.Infrastructure/   # EF Core, migrations, DB context
-│
-├── fe/grading-system/                   # Frontend (Next.js)
-│   ├── app/                             # Next.js App Router pages
-│   │   ├── assignments/                 # Quản lý đề thi
-│   │   ├── exam-sessions/               # Kỳ thi
-│   │   ├── submissions/                 # Bài nộp
-│   │   ├── exports/                     # Xuất kết quả
-│   │   └── grading/                     # Dashboard chấm thi
-│   └── components/                      # UI components dùng chung
-│
-├── supports/
-│   └── given/givenAPI/                  # API mẫu dùng làm reference cho Q2
-│
-├── docs/                                # Tài liệu bổ sung
-├── docker-compose.dev.yml               # Dev infrastructure only
-├── docker-compose.prod.yml              # Full production stack
-├── .env.example                         # Template biến môi trường
-└── DEPLOY_EC2_MANUAL.md                 # Hướng dẫn deploy lên AWS EC2
+grading-auto-server/
+├── GradingSystem.Api/                   # ASP.NET Core Web API
+│   ├── Controllers/
+│   ├── appsettings.json
+│   └── Program.cs
+├── GradingSystem.Worker/                # Background worker
+│   └── Services/                        # GradingPipeline, ArtifactRunner, ...
+├── GradingSystem.Application/
+├── GradingSystem.Domain/
+├── GradingSystem.Infrastructure/        # EF Core + migrations
+├── supports/given/givenAPI/             # API mẫu Q2
+├── storage/                             # Upload local (gitignored, tạo khi setup)
+├── docker-compose.dev.yml
+├── docker-compose.prod.yml
+├── Project.sln
+├── Taskfile.yml
+├── RUN_FOR_USER.md                      # User: Docker full stack
+├── RUN_FOR_DEV.md                       # Developer: infra Docker + dotnet run
+└── .env.example
 ```
 
 ---
@@ -358,9 +322,9 @@ POSTGRES_PASSWORD=grading_pass
 # SQL Server (Q1 grading)
 SA_PASSWORD=YourStrong@Passw0rd
 
-# RabbitMQ
-RABBITMQ_DEFAULT_USER=grading
-RABBITMQ_DEFAULT_PASS=grading_pass
+# RabbitMQ (docker-compose.dev.yml / prod)
+RABBITMQ_USER=grading
+RABBITMQ_PASSWORD=grading_pass
 
 # API
 ASPNETCORE_ENVIRONMENT=Development

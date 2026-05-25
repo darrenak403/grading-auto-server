@@ -411,6 +411,8 @@ sqlserver_data/
 **/.vs/
 **/.vscode/
 **/Properties/launchSettings.json
+!GradingSystem.Api/Properties/launchSettings.json
+!GradingSystem.Worker/Properties/launchSettings.json
 **/*.csproj.user
 
 # Frontend build outputs
