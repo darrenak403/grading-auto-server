@@ -142,20 +142,21 @@ public class DockerComposeRunner(
         }
     }
 
-    // Strips all host-port bindings (e.g. "1433:1433") from every docker-compose*.yml in composeDir
-    // so they don't conflict with ports already in use on the host machine.
-    // DB containers remain accessible internally via the compose network.
+    // Removes entire ports: blocks from every docker-compose*.yml in composeDir.
+    // Our override adds back only the API port; DB stays on the internal compose network.
+    // Strips the whole block (including the "ports:" key) to avoid orphaned keys that
+    // Docker Compose rejects with "must be a array".
     private static void StripHostPorts(string composeDir)
     {
-        // Matches port binding list items: - "HOST:CONTAINER" or - HOST:CONTAINER (with optional quotes/spaces)
-        var hostPortLine = new System.Text.RegularExpressions.Regex(
-            @"^\s*-\s*[""']?\d+:\d+[""']?\s*$",
+        // Matches: indented "ports:" line followed by zero-or-more "  - ..." child lines
+        var portsBlock = new System.Text.RegularExpressions.Regex(
+            @"^([ \t]+)ports:[ \t]*\r?\n(?:[ \t]+-[^\r\n]*\r?\n)*",
             System.Text.RegularExpressions.RegexOptions.Multiline);
 
         foreach (var file in Directory.EnumerateFiles(composeDir, "docker-compose*.yml"))
         {
             var content = File.ReadAllText(file);
-            var stripped = hostPortLine.Replace(content, string.Empty);
+            var stripped = portsBlock.Replace(content, string.Empty);
             if (!ReferenceEquals(stripped, content))
                 File.WriteAllText(file, stripped);
         }
