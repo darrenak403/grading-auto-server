@@ -145,6 +145,10 @@ services:
       Worker__LabDbPortRangeStart: ${WORKER_LAB_DB_PORT_START:-14000}
       Worker__LabDbPortRangeEnd: ${WORKER_LAB_DB_PORT_END:-14999}
       Worker__LabDockerHealthCheckTimeoutSeconds: ${WORKER_LAB_HEALTH_TIMEOUT:-60}
+      Worker__LabDockerBuildTimeoutSeconds: ${WORKER_LAB_BUILD_TIMEOUT:-300}
+      Worker__LabDockerDownTimeoutSeconds: ${WORKER_LAB_DOWN_TIMEOUT:-30}
+      Worker__LabContainerMemoryLimit: ${WORKER_LAB_MEMORY_LIMIT:-512m}
+      Worker__LabContainerCpuLimit: ${WORKER_LAB_CPU_LIMIT:-1.0}
     volumes:
       - ../storage:/storage
       - /var/run/docker.sock:/var/run/docker.sock
