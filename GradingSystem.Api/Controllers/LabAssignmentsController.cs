@@ -64,6 +64,13 @@ public class LabAssignmentsController(ILabAssignmentService service, ILabTestCas
             : $"{count} test case(s) approved." });
     }
 
+    [HttpDelete("lab-assignments/{id:guid}/testcases")]
+    public async Task<IActionResult> DeleteAllTestCasesAsync(Guid id, CancellationToken ct)
+    {
+        var count = await testCaseService.DeleteAllByAssignmentAsync(id, ct);
+        return Ok(new { Deleted = count }, $"{count} test case(s) deleted.");
+    }
+
     [HttpPost("lab-assignments/{id:guid}/grade")]
     public async Task<IActionResult> TriggerGradingAsync(Guid id, CancellationToken ct)
     {

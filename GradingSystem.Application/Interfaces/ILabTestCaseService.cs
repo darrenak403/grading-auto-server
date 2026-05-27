@@ -11,4 +11,5 @@ public interface ILabTestCaseService
     Task<LabTestCaseDto> SetStatusAsync(Guid id, string status, CancellationToken ct = default);
     Task<IEnumerable<LabTestCaseDto>> BulkCreateAsync(Guid assignmentId, IEnumerable<CreateLabTestCaseRequest> reqs, CancellationToken ct = default);
     Task<int> ApproveAllAsync(Guid assignmentId, CancellationToken ct = default);
+    Task<int> DeleteAllByAssignmentAsync(Guid assignmentId, CancellationToken ct = default);
 }

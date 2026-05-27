@@ -164,6 +164,18 @@ public class LabTestCaseService(IUnitOfWork uow) : ILabTestCaseService
         return drafts.Count;
     }
 
+    public async Task<int> DeleteAllByAssignmentAsync(Guid assignmentId, CancellationToken ct = default)
+    {
+        _ = await uow.LabAssignments.GetByIdAsync(assignmentId)
+            ?? throw new NotFoundException($"LabAssignment '{assignmentId}' not found.");
+        var testCases = (await uow.LabTestCases.FindAsync(t => t.LabAssignmentId == assignmentId)).ToList();
+        foreach (var tc in testCases)
+            uow.LabTestCases.Remove(tc);
+        if (testCases.Count > 0)
+            await uow.SaveChangesAsync(ct);
+        return testCases.Count;
+    }
+
     private static LabTestCaseDto Map(LabTestCase t) => new()
     {
         Id = t.Id,
