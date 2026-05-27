@@ -1,3 +1,6 @@
+using System.Text.Json.Serialization;
+using GradingSystem.Application.Json;
+
 namespace GradingSystem.Application.DTOs;
 
 public record SetLabTestCaseStatusRequest(string Status);
@@ -6,8 +9,8 @@ public record CreateLabTestCaseRequest(
     string HttpMethod,
     string UrlTemplate,
     string? Description,
-    string? InputJson,
-    string? ExpectJson,
+    [property: JsonConverter(typeof(JsonStringOrObjectConverter))] string? InputJson,
+    [property: JsonConverter(typeof(JsonStringOrObjectConverter))] string? ExpectJson,
     int ExpectedStatusCode = 200,
     string MatchMode = "Subset",
     decimal Score = 1.0m,
@@ -18,8 +21,8 @@ public record UpdateLabTestCaseRequest(
     string HttpMethod,
     string UrlTemplate,
     string? Description,
-    string? InputJson,
-    string? ExpectJson,
+    [property: JsonConverter(typeof(JsonStringOrObjectConverter))] string? InputJson,
+    [property: JsonConverter(typeof(JsonStringOrObjectConverter))] string? ExpectJson,
     int ExpectedStatusCode,
     string MatchMode,
     decimal Score,
@@ -33,8 +36,8 @@ public class LabTestCaseDto
     public string HttpMethod { get; init; } = null!;
     public string UrlTemplate { get; init; } = null!;
     public string? Description { get; init; }
-    public string? InputJson { get; init; }
-    public string? ExpectJson { get; init; }
+    [JsonConverter(typeof(JsonStringOrObjectConverter))] public string? InputJson { get; init; }
+    [JsonConverter(typeof(JsonStringOrObjectConverter))] public string? ExpectJson { get; init; }
     public int ExpectedStatusCode { get; init; }
     public string MatchMode { get; init; } = null!;
     public decimal Score { get; init; }
