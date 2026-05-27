@@ -145,7 +145,7 @@ public class GradingDbContext(DbContextOptions<GradingDbContext> options) : DbCo
             e.Property(x => x.Status).HasConversion<string>();
             e.HasIndex(x => new { x.LabAssignmentId, x.StudentCode }).IsUnique();
             e.HasOne(x => x.LabAssignment).WithMany(a => a.Submissions)
-                .HasForeignKey(x => x.LabAssignmentId).OnDelete(DeleteBehavior.Restrict);
+                .HasForeignKey(x => x.LabAssignmentId).OnDelete(DeleteBehavior.Cascade);
         });
 
         // LabGradingJob
@@ -164,7 +164,7 @@ public class GradingDbContext(DbContextOptions<GradingDbContext> options) : DbCo
             e.HasOne(x => x.LabGradingJob).WithMany(j => j.Results)
                 .HasForeignKey(x => x.LabGradingJobId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne(x => x.LabTestCase).WithMany()
-                .HasForeignKey(x => x.LabTestCaseId).OnDelete(DeleteBehavior.Restrict);
+                .HasForeignKey(x => x.LabTestCaseId).OnDelete(DeleteBehavior.Cascade);
         });
     }
 
