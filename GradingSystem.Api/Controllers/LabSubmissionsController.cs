@@ -46,6 +46,13 @@ public class LabSubmissionsController(
         return Ok(new { Message = "Regrade job created. Worker will pick it up shortly." });
     }
 
+    [HttpPost("lab-submissions/regrade-all")]
+    public async Task<IActionResult> RegradeAllAsync([FromQuery] Guid assignmentId, CancellationToken ct)
+    {
+        var count = await submissionService.RegradeAllAsync(assignmentId, ct);
+        return Ok(new { Queued = count }, $"{count} submission(s) queued for regrading.");
+    }
+
     [HttpPut("lab-submissions/{id:guid}/adjust")]
     public async Task<IActionResult> AdjustScoreAsync(Guid id, [FromBody] AdjustLabScoreRequest req, CancellationToken ct)
     {

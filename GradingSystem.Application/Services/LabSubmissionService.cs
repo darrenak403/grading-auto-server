@@ -113,6 +113,39 @@ public class LabSubmissionService(IUnitOfWork uow, IConfiguration config) : ILab
         await uow.SaveChangesAsync(ct);
     }
 
+    public async Task<int> RegradeAllAsync(Guid assignmentId, CancellationToken ct = default)
+    {
+        _ = await uow.LabAssignments.GetByIdAsync(assignmentId)
+            ?? throw new NotFoundException($"LabAssignment '{assignmentId}' not found.");
+
+        var submissions = (await uow.LabSubmissions.FindAsync(s => s.LabAssignmentId == assignmentId)).ToList();
+
+        foreach (var submission in submissions)
+        {
+            var activeJobs = (await uow.LabGradingJobs.FindAsync(j =>
+                j.LabSubmissionId == submission.Id &&
+                (j.Status == LabGradingJobStatus.Pending || j.Status == LabGradingJobStatus.Running)))
+                .ToList();
+
+            foreach (var job in activeJobs)
+            {
+                job.Status = LabGradingJobStatus.Failed;
+                job.ErrorMessage = "Cancelled — regrade all requested.";
+                job.FinishedAt = DateTime.UtcNow;
+                uow.LabGradingJobs.Update(job);
+            }
+
+            submission.Status = LabSubmissionStatus.Pending;
+            submission.UpdatedAt = DateTime.UtcNow;
+            uow.LabSubmissions.Update(submission);
+
+            await uow.LabGradingJobs.AddAsync(new LabGradingJob { LabSubmissionId = submission.Id });
+        }
+
+        await uow.SaveChangesAsync(ct);
+        return submissions.Count;
+    }
+
     public async Task DeleteAsync(Guid id, CancellationToken ct = default)
     {
         var submission = await uow.LabSubmissions.GetByIdAsync(id)

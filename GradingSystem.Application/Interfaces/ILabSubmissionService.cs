@@ -10,4 +10,5 @@ public interface ILabSubmissionService
     Task DeleteAsync(Guid id, CancellationToken ct = default);
     Task<int> DeleteAllByAssignmentAsync(Guid assignmentId, CancellationToken ct = default);
     Task RegradeAsync(Guid id, CancellationToken ct = default);
+    Task<int> RegradeAllAsync(Guid assignmentId, CancellationToken ct = default);
 }
