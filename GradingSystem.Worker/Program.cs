@@ -44,6 +44,7 @@ builder.Services.AddSingleton<GradingPipeline>();
 
 builder.Services.AddSingleton<DockerComposeRunner>();
 builder.Services.AddSingleton<LabTestRunner>();
+builder.Services.AddSingleton<SourceAnalyzer>();
 builder.Services.AddSingleton<LabGradingPipeline>();
 
 var workerOpts = builder.Configuration.GetSection("Worker").Get<WorkerOptions>() ?? new WorkerOptions();

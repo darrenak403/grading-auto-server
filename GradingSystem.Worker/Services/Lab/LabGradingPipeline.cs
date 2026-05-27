@@ -7,6 +7,7 @@ public class LabGradingPipeline(
     IServiceScopeFactory scopeFactory,
     DockerComposeRunner docker,
     LabTestRunner testRunner,
+    SourceAnalyzer sourceAnalyzer,
     ILogger<LabGradingPipeline> logger)
 {
     private readonly SemaphoreSlim _gate = new(1, 1);
@@ -54,6 +55,14 @@ public class LabGradingPipeline(
             tc.Status == LabTestCaseStatus.Approved))
             .ToList();
 
+        var sourceTests = testCases
+            .Where(tc => tc.HttpMethod.Equals("SOURCE", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(t => t.Order).ThenBy(t => t.CreatedAt)
+            .ToList();
+        var httpTests = testCases
+            .Where(tc => !tc.HttpMethod.Equals("SOURCE", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
         job.Status    = LabGradingJobStatus.Running;
         job.StartedAt = DateTime.UtcNow;
         submission.Status = LabSubmissionStatus.Grading;
@@ -61,25 +70,40 @@ public class LabGradingPipeline(
         uow.LabSubmissions.Update(submission);
         await uow.SaveChangesAsync(ct);
 
-        logger.LogInformation("Processing lab job {JobId}, {Count} approved testcases", jobId, testCases.Count);
+        logger.LogInformation(
+            "Processing lab job {JobId} — {Total} approved test cases ({Source} source, {Http} http)",
+            jobId, testCases.Count, sourceTests.Count, httpTests.Count);
 
-        int apiPort = 0;
+        var allResults = new List<LabTestCaseResult>();
+
         try
         {
-            apiPort = await docker.StartAsync(submission.FilePath, jobId, ct);
-            var results = await testRunner.RunAsync($"http://localhost:{apiPort}", jobId, testCases, ct);
+            // Phase 1: Extract archive — SOURCE checks need this, always runs first
+            var workDir = docker.Extract(submission.FilePath, jobId);
 
-            foreach (var r in results)
-                await uow.LabTestCaseResults.AddAsync(r);
+            // Phase 2: SOURCE checks — file-system only, no Docker needed
+            foreach (var tc in sourceTests)
+            {
+                var r = sourceAnalyzer.Check(tc, workDir, jobId);
+                allResults.Add(r);
+                logger.LogInformation("Job {JobId} SOURCE tc {TcId}: passed={Passed} — {Detail}",
+                    jobId, tc.Id, r.Passed, r.ActualResponse);
+            }
+
+            // Phase 3: Docker + HTTP checks
+            var apiPort = await docker.StartContainersAsync(workDir, jobId, ct);
+            var httpResults = await testRunner.RunAsync($"http://localhost:{apiPort}", jobId, httpTests, ct);
+            allResults.AddRange(httpResults);
 
             job.Status        = LabGradingJobStatus.Done;
             submission.Status = LabSubmissionStatus.Done;
             logger.LogInformation("Lab job {JobId} done — {Passed}/{Total} passed",
-                jobId, results.Count(r => r.Passed), results.Count);
+                jobId, allResults.Count(r => r.Passed), allResults.Count);
         }
         catch (DockerComposeTimeoutException ex)
         {
-            logger.LogWarning(ex, "Lab job {JobId} timed out", jobId);
+            logger.LogWarning(ex, "Lab job {JobId} timed out starting Docker", jobId);
+            allResults.AddRange(FailRemaining(httpTests, allResults, jobId, $"Docker timed out: {ex.Message}"));
             uow.ClearChanges();
             job        = (await uow.LabGradingJobs.GetByIdAsync(jobId))!;
             submission = (await uow.LabSubmissions.GetByIdAsync(job.LabSubmissionId))!;
@@ -90,6 +114,7 @@ public class LabGradingPipeline(
         catch (Exception ex)
         {
             logger.LogError(ex, "Lab job {JobId} failed", jobId);
+            allResults.AddRange(FailRemaining(testCases, allResults, jobId, ex.Message));
             uow.ClearChanges();
             job        = (await uow.LabGradingJobs.GetByIdAsync(jobId))!;
             submission = (await uow.LabSubmissions.GetByIdAsync(job.LabSubmissionId))!;
@@ -99,6 +124,9 @@ public class LabGradingPipeline(
         }
         finally
         {
+            foreach (var r in allResults)
+                await uow.LabTestCaseResults.AddAsync(r);
+
             job.FinishedAt = DateTime.UtcNow;
             uow.LabGradingJobs.Update(job);
             uow.LabSubmissions.Update(submission);
@@ -109,5 +137,25 @@ public class LabGradingPipeline(
             try { await uow.SaveChangesAsync(CancellationToken.None); }
             catch (Exception ex) { logger.LogError(ex, "Final save failed for job {JobId}", jobId); }
         }
+    }
+
+    private static IEnumerable<LabTestCaseResult> FailRemaining(
+        IEnumerable<LabTestCase> allTests,
+        List<LabTestCaseResult> done,
+        Guid jobId,
+        string error)
+    {
+        var doneIds = done.Select(r => r.LabTestCaseId).ToHashSet();
+        return allTests
+            .Where(tc => !doneIds.Contains(tc.Id))
+            .Select(tc => new LabTestCaseResult
+            {
+                LabGradingJobId  = jobId,
+                LabTestCaseId    = tc.Id,
+                Passed           = false,
+                AwardedScore     = 0,
+                ActualStatusCode = 0,
+                ErrorMessage     = error,
+            });
     }
 }

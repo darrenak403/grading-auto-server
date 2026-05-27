@@ -20,13 +20,18 @@ public class DockerComposeRunner(
     private static readonly string WorkRoot = Path.Combine(Path.GetTempPath(), "lab-grading");
     private readonly ConcurrentDictionary<Guid, string> _composeDirs = new();
 
-    public async Task<int> StartAsync(string archivePath, Guid jobId, CancellationToken ct)
+    /// <summary>Extracts the submission archive to a temp workdir. Returns the workdir path.</summary>
+    public string Extract(string archivePath, Guid jobId)
     {
         var workDir = Path.Combine(WorkRoot, jobId.ToString());
         Directory.CreateDirectory(workDir);
-
         ExtractArchive(archivePath, workDir);
+        return workDir;
+    }
 
+    /// <summary>Starts Docker containers from an already-extracted workdir. Returns the assigned API port.</summary>
+    public async Task<int> StartContainersAsync(string workDir, Guid jobId, CancellationToken ct)
+    {
         var composePath = Directory.GetFiles(workDir, "docker-compose.yml", SearchOption.AllDirectories)
             .FirstOrDefault() ?? throw new DockerComposeException("docker-compose.yml not found in archive.");
 
@@ -48,6 +53,12 @@ public class DockerComposeRunner(
         await WaitForApiAsync(apiPort, jobId, ct);
 
         return apiPort;
+    }
+
+    public async Task<int> StartAsync(string archivePath, Guid jobId, CancellationToken ct)
+    {
+        var workDir = Extract(archivePath, jobId);
+        return await StartContainersAsync(workDir, jobId, ct);
     }
 
     public async Task StopAsync(Guid jobId)
