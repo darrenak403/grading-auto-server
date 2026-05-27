@@ -169,10 +169,16 @@ public class LabTestCaseService(IUnitOfWork uow) : ILabTestCaseService
         _ = await uow.LabAssignments.GetByIdAsync(assignmentId)
             ?? throw new NotFoundException($"LabAssignment '{assignmentId}' not found.");
         var testCases = (await uow.LabTestCases.FindAsync(t => t.LabAssignmentId == assignmentId)).ToList();
+        if (testCases.Count == 0) return 0;
+
+        var tcIds = testCases.Select(t => t.Id).ToHashSet();
+        var results = (await uow.LabTestCaseResults.FindAsync(r => tcIds.Contains(r.LabTestCaseId))).ToList();
+        foreach (var r in results)
+            uow.LabTestCaseResults.Remove(r);
         foreach (var tc in testCases)
             uow.LabTestCases.Remove(tc);
-        if (testCases.Count > 0)
-            await uow.SaveChangesAsync(ct);
+
+        await uow.SaveChangesAsync(ct);
         return testCases.Count;
     }
 
