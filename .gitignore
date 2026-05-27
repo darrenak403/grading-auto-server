@@ -476,7 +476,6 @@ test-*.ps1
 # pnpm-lock.yaml
 # yarn.lock
 
-docs/*
 
 .claude
 
