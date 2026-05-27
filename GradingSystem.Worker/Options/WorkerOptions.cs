@@ -9,4 +9,11 @@ public class WorkerOptions
     public int ArtifactPortRangeEnd { get; set; } = 7999;
     public string? NewmanExecutable { get; set; }
     public string BindHost { get; set; } = "127.0.0.1";
+
+    // Lab Docker grading port ranges
+    public int LabApiPortRangeStart { get; set; } = 15000;
+    public int LabApiPortRangeEnd { get; set; } = 16000;
+    public int LabDbPortRangeStart { get; set; } = 14000;
+    public int LabDbPortRangeEnd { get; set; } = 14999;
+    public int LabDockerHealthCheckTimeoutSeconds { get; set; } = 60;
 }

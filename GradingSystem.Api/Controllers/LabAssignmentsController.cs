@@ -1,0 +1,66 @@
+using GradingSystem.Application.DTOs;
+using GradingSystem.Application.Interfaces;
+using Microsoft.AspNetCore.Mvc;
+
+namespace GradingSystem.Api.Controllers;
+
+public class LabAssignmentsController(ILabAssignmentService service, ILabTestCaseService testCaseService) : BaseApiController
+{
+    [HttpGet("lab-assignments")]
+    public async Task<IActionResult> ListAsync(CancellationToken ct)
+    {
+        var result = await service.ListAsync(ct);
+        return Ok(result);
+    }
+
+    [HttpGet("lab-assignments/{id:guid}")]
+    public async Task<IActionResult> GetByIdAsync(Guid id, CancellationToken ct)
+    {
+        var result = await service.GetByIdAsync(id, ct);
+        return result is null ? NotFound($"LabAssignment '{id}' not found.") : Ok(result);
+    }
+
+    [HttpPost("lab-assignments")]
+    public async Task<IActionResult> CreateAsync([FromBody] CreateLabAssignmentRequest req, CancellationToken ct)
+    {
+        var result = await service.CreateAsync(req, ct);
+        return Ok(result, "Lab assignment created.");
+    }
+
+    [HttpPut("lab-assignments/{id:guid}")]
+    public async Task<IActionResult> UpdateAsync(Guid id, [FromBody] UpdateLabAssignmentRequest req, CancellationToken ct)
+    {
+        var result = await service.UpdateAsync(id, req, ct);
+        return Ok(result, "Lab assignment updated.");
+    }
+
+    [HttpDelete("lab-assignments/{id:guid}")]
+    public async Task<IActionResult> DeleteAsync(Guid id, CancellationToken ct)
+    {
+        await service.DeleteAsync(id, ct);
+        return NoContent();
+    }
+
+    [HttpGet("lab-assignments/{id:guid}/testcases")]
+    public async Task<IActionResult> GetTestCasesAsync(Guid id, CancellationToken ct)
+    {
+        var result = await service.GetTestCasesAsync(id, ct);
+        return Ok(result);
+    }
+
+    [HttpPost("lab-assignments/{id:guid}/testcases")]
+    public async Task<IActionResult> CreateTestCaseAsync(Guid id, [FromBody] CreateLabTestCaseRequest req, CancellationToken ct)
+    {
+        var result = await testCaseService.CreateAsync(id, req, ct);
+        return Ok(result, "Test case created.");
+    }
+
+    [HttpPost("lab-assignments/{id:guid}/grade")]
+    public async Task<IActionResult> TriggerGradingAsync(Guid id, CancellationToken ct)
+    {
+        var count = await service.TriggerGradingAsync(id, ct);
+        return Ok(new { JobsCreated = count, Message = count == 0
+            ? "No new grading jobs created — all submissions already have active jobs."
+            : $"{count} grading job(s) created." });
+    }
+}

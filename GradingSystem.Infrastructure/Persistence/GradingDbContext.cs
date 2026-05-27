@@ -16,6 +16,14 @@ public class GradingDbContext(DbContextOptions<GradingDbContext> options) : DbCo
     public DbSet<ReviewNote> ReviewNotes => Set<ReviewNote>();
     public DbSet<ExportJob> ExportJobs => Set<ExportJob>();
 
+    // Lab grading
+    public DbSet<Semester> Semesters => Set<Semester>();
+    public DbSet<LabAssignment> LabAssignments => Set<LabAssignment>();
+    public DbSet<LabTestCase> LabTestCases => Set<LabTestCase>();
+    public DbSet<LabSubmission> LabSubmissions => Set<LabSubmission>();
+    public DbSet<LabGradingJob> LabGradingJobs => Set<LabGradingJob>();
+    public DbSet<LabTestCaseResult> LabTestCaseResults => Set<LabTestCaseResult>();
+
     protected override void OnModelCreating(ModelBuilder b)
     {
         // ExamSession
@@ -99,6 +107,64 @@ public class GradingDbContext(DbContextOptions<GradingDbContext> options) : DbCo
         b.Entity<ReviewNote>(e =>
         {
             e.HasIndex(x => x.SubmissionId).IsUnique();
+        });
+
+        // Semester
+        b.Entity<Semester>(e =>
+        {
+            e.Property(x => x.Name).HasMaxLength(200).IsRequired();
+            e.Property(x => x.Code).HasMaxLength(50).IsRequired();
+            e.HasIndex(x => x.Code).IsUnique();
+        });
+
+        // LabAssignment
+        b.Entity<LabAssignment>(e =>
+        {
+            e.Property(x => x.Title).HasMaxLength(200).IsRequired();
+            e.Property(x => x.Status).HasConversion<string>();
+            e.HasOne(x => x.Semester).WithMany(s => s.LabAssignments)
+                .HasForeignKey(x => x.SemesterId).IsRequired(false).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // LabTestCase
+        b.Entity<LabTestCase>(e =>
+        {
+            e.Property(x => x.HttpMethod).HasMaxLength(10).IsRequired();
+            e.Property(x => x.UrlTemplate).HasMaxLength(500).IsRequired();
+            e.Property(x => x.Score).HasPrecision(5, 2);
+            e.Property(x => x.Status).HasConversion<string>();
+            e.Property(x => x.MatchMode).HasConversion<string>();
+            e.HasOne(x => x.LabAssignment).WithMany(a => a.TestCases)
+                .HasForeignKey(x => x.LabAssignmentId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // LabSubmission
+        b.Entity<LabSubmission>(e =>
+        {
+            e.Property(x => x.StudentCode).HasMaxLength(50).IsRequired();
+            e.Property(x => x.Status).HasConversion<string>();
+            e.HasIndex(x => new { x.LabAssignmentId, x.StudentCode }).IsUnique();
+            e.HasOne(x => x.LabAssignment).WithMany(a => a.Submissions)
+                .HasForeignKey(x => x.LabAssignmentId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // LabGradingJob
+        b.Entity<LabGradingJob>(e =>
+        {
+            e.Property(x => x.Status).HasConversion<string>();
+            e.HasOne(x => x.LabSubmission).WithMany(s => s.GradingJobs)
+                .HasForeignKey(x => x.LabSubmissionId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // LabTestCaseResult
+        b.Entity<LabTestCaseResult>(e =>
+        {
+            e.Property(x => x.AwardedScore).HasPrecision(5, 2);
+            e.Property(x => x.ManualOverrideScore).HasPrecision(5, 2);
+            e.HasOne(x => x.LabGradingJob).WithMany(j => j.Results)
+                .HasForeignKey(x => x.LabGradingJobId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.LabTestCase).WithMany()
+                .HasForeignKey(x => x.LabTestCaseId).OnDelete(DeleteBehavior.Restrict);
         });
     }
 

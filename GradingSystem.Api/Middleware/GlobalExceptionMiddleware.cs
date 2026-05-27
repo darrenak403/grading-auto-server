@@ -1,5 +1,8 @@
 using System.Text.Json;
 using GradingSystem.Application.Common;
+using GradingSystem.Application.Exceptions;
+using Microsoft.EntityFrameworkCore;
+using Npgsql;
 
 namespace GradingSystem.Api.Middleware;
 
@@ -24,8 +27,13 @@ public class GlobalExceptionMiddleware(RequestDelegate next, ILogger<GlobalExcep
     {
         var (status, message) = ex switch
         {
+            NotFoundException n       => (StatusCodes.Status404NotFound, n.Message),
+            BadRequestException b     => (StatusCodes.Status400BadRequest, b.Message),
+            ConflictException c       => (StatusCodes.Status409Conflict, c.Message),
+            DbUpdateException { InnerException: PostgresException { SqlState: "23505" } pg }
+                                      => (StatusCodes.Status409Conflict, $"A record with the same unique value already exists. ({pg.ConstraintName})"),
             ArgumentException or ArgumentNullException => (StatusCodes.Status400BadRequest, ex.Message),
-            KeyNotFoundException => (StatusCodes.Status404NotFound, ex.Message),
+            KeyNotFoundException      => (StatusCodes.Status404NotFound, ex.Message),
             UnauthorizedAccessException => (StatusCodes.Status401Unauthorized, ex.Message),
             _ => (StatusCodes.Status500InternalServerError, "An unexpected error occurred."),
         };

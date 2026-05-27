@@ -102,6 +102,10 @@ services:
       RabbitMQ__Password: ${RABBITMQ_PASSWORD}
       Cors__AllowedOrigins__0: ${CORS_ORIGIN_0}
       Cors__AllowedOrigins__1: ${CORS_ORIGIN_1}
+      AWS__AccessKey: ${AWS_ACCESS_KEY}
+      AWS__SecretKey: ${AWS_SECRET_KEY}
+      AWS__Region: ${AWS_REGION:-us-east-1}
+      AWS__BedrockModelId: ${AWS_BEDROCK_MODEL_ID:-anthropic.claude-3-5-sonnet-20241022-v2:0}
     volumes:
       - storage-data:/storage
     depends_on:
@@ -132,8 +136,18 @@ services:
       Worker__ArtifactPortRangeEnd: ${WORKER_ARTIFACT_PORT_RANGE_END:-7999}
       Worker__BindHost: ${WORKER_BIND_HOST:-127.0.0.1}
       Worker__NewmanExecutable: ${WORKER_NEWMAN_EXECUTABLE:-}
+      AWS__AccessKey: ${AWS_ACCESS_KEY}
+      AWS__SecretKey: ${AWS_SECRET_KEY}
+      AWS__Region: ${AWS_REGION:-us-east-1}
+      AWS__BedrockModelId: ${AWS_BEDROCK_MODEL_ID:-anthropic.claude-3-5-sonnet-20241022-v2:0}
+      Worker__LabApiPortRangeStart: ${WORKER_LAB_API_PORT_START:-15000}
+      Worker__LabApiPortRangeEnd: ${WORKER_LAB_API_PORT_END:-16000}
+      Worker__LabDbPortRangeStart: ${WORKER_LAB_DB_PORT_START:-14000}
+      Worker__LabDbPortRangeEnd: ${WORKER_LAB_DB_PORT_END:-14999}
+      Worker__LabHealthCheckTimeoutSeconds: ${WORKER_LAB_HEALTH_TIMEOUT:-60}
     volumes:
       - storage-data:/storage
+      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       postgres:
         condition: service_healthy

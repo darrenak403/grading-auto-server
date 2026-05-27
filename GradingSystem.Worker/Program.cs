@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using GradingSystem.Worker.Consumers;
 using GradingSystem.Worker.Options;
 using GradingSystem.Worker.Services;
+using GradingSystem.Worker.Services.Lab;
 using GradingSystem.Worker.Workers;
 using MassTransit;
 
@@ -41,6 +42,10 @@ builder.Services.AddSingleton<TestRunner>();
 builder.Services.AddSingleton<ExportRunner>();
 builder.Services.AddSingleton<GradingPipeline>();
 
+builder.Services.AddSingleton<DockerComposeRunner>();
+builder.Services.AddSingleton<LabTestRunner>();
+builder.Services.AddSingleton<LabGradingPipeline>();
+
 var workerOpts = builder.Configuration.GetSection("Worker").Get<WorkerOptions>() ?? new WorkerOptions();
 
 builder.Services.AddMassTransit(x =>
@@ -49,6 +54,7 @@ builder.Services.AddMassTransit(x =>
     {
         e.PrefetchCount = workerOpts.MaxConcurrentJobs;
     });
+    x.AddConsumer<LabGradeJobConsumer>();
 
     x.UsingRabbitMq((ctx, cfg) =>
     {
@@ -63,6 +69,7 @@ builder.Services.AddMassTransit(x =>
 });
 
 builder.Services.AddHostedService<GradingWorker>();
+builder.Services.AddHostedService<LabGradingWorker>();
 builder.Services.AddHostedService<StorageCleanupWorker>();
 
 var host = builder.Build();

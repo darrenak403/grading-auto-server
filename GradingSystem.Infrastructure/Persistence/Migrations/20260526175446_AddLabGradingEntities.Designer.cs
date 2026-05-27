@@ -3,6 +3,7 @@ using System;
 using GradingSystem.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace GradingSystem.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(GradingDbContext))]
-    partial class GradingDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260526175446_AddLabGradingEntities")]
+    partial class AddLabGradingEntities
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -193,9 +196,6 @@ namespace GradingSystem.Infrastructure.Persistence.Migrations
                     b.Property<string>("PdfPath")
                         .HasColumnType("text");
 
-                    b.Property<Guid?>("SemesterId")
-                        .HasColumnType("uuid");
-
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasColumnType("text");
@@ -209,8 +209,6 @@ namespace GradingSystem.Infrastructure.Persistence.Migrations
                         .HasColumnType("timestamp with time zone");
 
                     b.HasKey("Id");
-
-                    b.HasIndex("SemesterId");
 
                     b.ToTable("LabAssignments");
                 });
@@ -566,42 +564,6 @@ namespace GradingSystem.Infrastructure.Persistence.Migrations
                     b.ToTable("ReviewNotes");
                 });
 
-            modelBuilder.Entity("GradingSystem.Domain.Entities.Semester", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Code")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateOnly?>("EndDate")
-                        .HasColumnType("date");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.Property<DateOnly?>("StartDate")
-                        .HasColumnType("date");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("Code")
-                        .IsUnique();
-
-                    b.ToTable("Semesters");
-                });
-
             modelBuilder.Entity("GradingSystem.Domain.Entities.Submission", b =>
                 {
                     b.Property<Guid>("Id")
@@ -736,16 +698,6 @@ namespace GradingSystem.Infrastructure.Persistence.Migrations
                         .IsRequired();
 
                     b.Navigation("Submission");
-                });
-
-            modelBuilder.Entity("GradingSystem.Domain.Entities.LabAssignment", b =>
-                {
-                    b.HasOne("GradingSystem.Domain.Entities.Semester", "Semester")
-                        .WithMany("LabAssignments")
-                        .HasForeignKey("SemesterId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.Navigation("Semester");
                 });
 
             modelBuilder.Entity("GradingSystem.Domain.Entities.LabGradingJob", b =>
@@ -935,11 +887,6 @@ namespace GradingSystem.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("GradingSystem.Domain.Entities.Question", b =>
                 {
                     b.Navigation("TestCases");
-                });
-
-            modelBuilder.Entity("GradingSystem.Domain.Entities.Semester", b =>
-                {
-                    b.Navigation("LabAssignments");
                 });
 
             modelBuilder.Entity("GradingSystem.Domain.Entities.Submission", b =>

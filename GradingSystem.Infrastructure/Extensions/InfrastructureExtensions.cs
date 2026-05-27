@@ -26,6 +26,13 @@ public static class InfrastructureExtensions
         services.AddScoped<IQuestionResultService, QuestionResultService>();
         services.AddScoped<IGradingJobService, GradingJobService>();
 
+        // Lab grading
+        services.AddScoped<ISemesterService, SemesterService>();
+        services.AddScoped<ILabAssignmentService, LabAssignmentService>();
+        services.AddScoped<ILabTestCaseService, LabTestCaseService>();
+        services.AddScoped<ILabSubmissionService, LabSubmissionService>();
+        services.AddScoped<ILabGradingResultService, LabGradingResultService>();
+
         return services;
     }
 }

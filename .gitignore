@@ -475,3 +475,13 @@ test-*.ps1
 # package-lock.json
 # pnpm-lock.yaml
 # yarn.lock
+
+docs/*
+
+.claude
+
+.ck.json
+
+.mcp.json
+
+plans

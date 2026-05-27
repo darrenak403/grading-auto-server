@@ -56,18 +56,28 @@ tasks:
     desc: API local — :5049/swagger
     dir: '{{.API_DIR}}'
     interactive: true
+    dotenv: ['../docker/.env.local']
     env:
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_URLS: http://localhost:5049
+      AWS__AccessKey: '{{.AWS_ACCESS_KEY}}'
+      AWS__SecretKey: '{{.AWS_SECRET_KEY}}'
+      AWS__Region: '{{.AWS_REGION | default "us-east-1"}}'
+      AWS__BedrockModelId: '{{.AWS_BEDROCK_MODEL_ID | default "anthropic.claude-3-5-sonnet-20241022-v2:0"}}'
     cmd: dotnet run
 
   run:worker:
     desc: Worker local
     dir: '{{.WORKER_DIR}}'
     interactive: true
+    dotenv: ['../docker/.env.local']
     env:
       DOTNET_ENVIRONMENT: Development
       ASPNETCORE_ENVIRONMENT: Development
+      AWS__AccessKey: '{{.AWS_ACCESS_KEY}}'
+      AWS__SecretKey: '{{.AWS_SECRET_KEY}}'
+      AWS__Region: '{{.AWS_REGION | default "us-east-1"}}'
+      AWS__BedrockModelId: '{{.AWS_BEDROCK_MODEL_ID | default "anthropic.claude-3-5-sonnet-20241022-v2:0"}}'
     cmd: dotnet run
 
   _env:local:
