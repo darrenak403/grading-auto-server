@@ -315,9 +315,9 @@ Nếu không có Draft nào: `approved: 0`.
 
 **Form fields:** `files` (multiple files)
 
-**Quy tắc đặt tên file:** `{MaSV}_{HoTen}.zip` (hoặc `.rar`)
-- Phần trước dấu `_` đầu tiên = mã sinh viên
-- Ví dụ: `SE180234_NguyenVanA.zip`, `SE180456_TranThiB.rar`
+**Quy tắc đặt tên file:** `Lab{N}_{MaSV}.zip` (hoặc `.rar`)
+- Phần **sau** dấu `_` đầu tiên = mã sinh viên
+- Ví dụ: `Lab1_SE180234.zip`, `Lab1_SE180456.rar`
 
 **Response `data`:**
 ```json
@@ -334,7 +334,7 @@ Nếu không có Draft nào: `approved: 0`.
     }
   ],
   "warnings": [
-    "Skipped 'NoUnderscore.zip': filename must contain '_' separator (e.g. SE180234_Name.zip)"
+    "Skipped 'NoUnderscore.zip': filename must contain '_' separator (e.g. Lab1_SE180234.zip)"
   ]
 }
 ```
@@ -533,8 +533,9 @@ Chỉ test case `Approved` mới được dùng khi chấm.
 
 ### File upload convention
 
-- Tên file bắt buộc: `{MaSV}_{BấtKỳ}.zip|.rar|...`
-- Phần trước `_` đầu tiên = `studentCode` (dùng để nhận diện sinh viên)
+- Tên file bắt buộc: `Lab{N}_{MaSV}.zip|.rar|...`
+- Phần **sau** `_` đầu tiên = `studentCode` (dùng để nhận diện sinh viên)
+- Ví dụ: `Lab1_SE180234.zip` → `studentCode = "SE180234"`
 - Nếu upload nhiều file cùng `studentCode` → file sau bị skip, warning được trả về
 
 ### SOURCE vs HTTP test cases
