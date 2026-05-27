@@ -37,7 +37,7 @@ public class LabGradingPipeline(
             return;
         }
 
-        if (job.Status != LabGradingJobStatus.Pending)
+        if (job.Status == LabGradingJobStatus.Done || job.Status == LabGradingJobStatus.Failed)
         {
             logger.LogInformation("LabGradingJob {Id} is already {Status} — skipping", jobId, job.Status);
             return;

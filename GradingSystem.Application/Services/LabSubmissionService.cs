@@ -86,6 +86,33 @@ public class LabSubmissionService(IUnitOfWork uow, IConfiguration config) : ILab
         return new LabBatchUploadResult { Created = created, Warnings = warnings };
     }
 
+    public async Task RegradeAsync(Guid id, CancellationToken ct = default)
+    {
+        var submission = await uow.LabSubmissions.GetByIdAsync(id)
+            ?? throw new NotFoundException($"LabSubmission '{id}' not found.");
+
+        // Cancel any active jobs so the new job won't be skipped
+        var activeJobs = (await uow.LabGradingJobs.FindAsync(j =>
+            j.LabSubmissionId == id &&
+            (j.Status == LabGradingJobStatus.Pending || j.Status == LabGradingJobStatus.Running)))
+            .ToList();
+
+        foreach (var job in activeJobs)
+        {
+            job.Status = LabGradingJobStatus.Failed;
+            job.ErrorMessage = "Cancelled — regrade requested.";
+            job.FinishedAt = DateTime.UtcNow;
+            uow.LabGradingJobs.Update(job);
+        }
+
+        submission.Status = LabSubmissionStatus.Pending;
+        submission.UpdatedAt = DateTime.UtcNow;
+        uow.LabSubmissions.Update(submission);
+
+        await uow.LabGradingJobs.AddAsync(new LabGradingJob { LabSubmissionId = id });
+        await uow.SaveChangesAsync(ct);
+    }
+
     public async Task DeleteAsync(Guid id, CancellationToken ct = default)
     {
         var submission = await uow.LabSubmissions.GetByIdAsync(id)
@@ -94,6 +121,22 @@ public class LabSubmissionService(IUnitOfWork uow, IConfiguration config) : ILab
             File.Delete(submission.FilePath);
         uow.LabSubmissions.Remove(submission);
         await uow.SaveChangesAsync(ct);
+    }
+
+    public async Task<int> DeleteAllByAssignmentAsync(Guid assignmentId, CancellationToken ct = default)
+    {
+        _ = await uow.LabAssignments.GetByIdAsync(assignmentId)
+            ?? throw new NotFoundException($"LabAssignment '{assignmentId}' not found.");
+        var submissions = (await uow.LabSubmissions.FindAsync(s => s.LabAssignmentId == assignmentId)).ToList();
+        foreach (var s in submissions)
+        {
+            if (File.Exists(s.FilePath))
+                File.Delete(s.FilePath);
+            uow.LabSubmissions.Remove(s);
+        }
+        if (submissions.Count > 0)
+            await uow.SaveChangesAsync(ct);
+        return submissions.Count;
     }
 
     private static LabSubmissionDto Map(LabSubmission s) => new()

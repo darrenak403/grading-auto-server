@@ -39,10 +39,31 @@ public class LabSubmissionsController(
         return result is null ? NotFound($"LabSubmission '{id}' not found.") : Ok(result);
     }
 
+    [HttpPost("lab-submissions/{id:guid}/regrade")]
+    public async Task<IActionResult> RegradeAsync(Guid id, CancellationToken ct)
+    {
+        await submissionService.RegradeAsync(id, ct);
+        return Ok(new { Message = "Regrade job created. Worker will pick it up shortly." });
+    }
+
     [HttpPut("lab-submissions/{id:guid}/adjust")]
     public async Task<IActionResult> AdjustScoreAsync(Guid id, [FromBody] AdjustLabScoreRequest req, CancellationToken ct)
     {
         var result = await resultService.AdjustScoreAsync(id, req.ResultId, req.Score, req.Reason, ct);
         return Ok(result, "Score adjusted.");
+    }
+
+    [HttpDelete("lab-submissions/{id:guid}")]
+    public async Task<IActionResult> DeleteAsync(Guid id, CancellationToken ct)
+    {
+        await submissionService.DeleteAsync(id, ct);
+        return Ok(new { }, "Submission deleted.");
+    }
+
+    [HttpDelete("lab-submissions")]
+    public async Task<IActionResult> DeleteAllAsync([FromQuery] Guid assignmentId, CancellationToken ct)
+    {
+        var count = await submissionService.DeleteAllByAssignmentAsync(assignmentId, ct);
+        return Ok(new { Deleted = count }, $"{count} submission(s) deleted.");
     }
 }
