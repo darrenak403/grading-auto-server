@@ -125,17 +125,20 @@ Approve từng test case muốn dùng để chấm:
 Trong Swagger: chọn **"Choose Files"**, upload file ZIP/RAR.
 
 **Quy tắc đặt tên file bắt buộc:**
+
 ```
 SE180234_NguyenVanA.zip
 SE180456_TranThiB.rar
 ```
+
 Phần trước dấu `_` đầu tiên = mã sinh viên.
 
 ✅ Response:
+
 ```json
 {
   "data": {
-    "created": [ { "id": "...", "studentCode": "SE180234", "status": "Pending" } ],
+    "created": [{"id": "...", "studentCode": "SE180234", "status": "Pending"}],
     "warnings": []
   }
 }
@@ -165,13 +168,13 @@ Worker sẽ xử lý bất đồng bộ. Theo dõi log worker ở terminal.
 
 Refresh cho đến khi `status` không còn `"Pending"` hoặc `"Grading"`:
 
-| Status | Ý nghĩa |
-|--------|---------|
-| `Pending` | Chưa được chấm |
-| `Grading` | Đang chấm |
-| `Done` | Chấm xong |
+| Status        | Ý nghĩa                                              |
+| ------------- | ---------------------------------------------------- |
+| `Pending`     | Chưa được chấm                                       |
+| `Grading`     | Đang chấm                                            |
+| `Done`        | Chấm xong                                            |
 | `BuildFailed` | Docker build thất bại (SOURCE test case vẫn có điểm) |
-| `Error` | Lỗi không mong đợi |
+| `Error`       | Lỗi không mong đợi                                   |
 
 ---
 
@@ -180,6 +183,7 @@ Refresh cho đến khi `status` không còn `"Pending"` hoặc `"Grading"`:
 **`GET /api/v1/lab-submissions/{submissionId}/results`**
 
 Response:
+
 ```json
 {
   "data": {

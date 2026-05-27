@@ -42,6 +42,7 @@
 - `DELETE /lab-submissions?assignmentId={id}` — xóa toàn bộ bài nộp của lab (kèm file)
 - `GET /lab-submissions/{id}/results` — kết quả chấm chi tiết của một bài
 - `POST /lab-submissions/{id}/regrade` — chấm lại một bài (hủy job cũ, tạo job mới)
+- `POST /lab-submissions/regrade-all?assignmentId={id}` — chấm lại **toàn bộ** bài nộp của lab
 - `PUT /lab-submissions/{id}/adjust` — điều chỉnh điểm thủ công
 
 ---
@@ -394,7 +395,7 @@ Không cần body. Xóa tất cả submission của assignment đó kèm file tr
 
 ---
 
-#### `POST /lab-submissions/{id}/regrade` — Chấm lại
+#### `POST /lab-submissions/{id}/regrade` — Chấm lại một bài
 
 Không cần body. Hủy các job đang `Pending`/`Running` của submission đó, tạo job mới.
 
@@ -403,7 +404,22 @@ Không cần body. Hủy các job đang `Pending`/`Running` của submission đ�
 { "message": "Regrade job created. Worker will pick it up shortly." }
 ```
 
-> Dùng khi submission bị kẹt ở `Error` hoặc `BuildFailed` và muốn chấm lại sau khi sửa test case.
+> Dùng khi một bài bị kẹt ở `Error` hoặc `BuildFailed` và muốn chấm lại.
+
+---
+
+#### `POST /lab-submissions/regrade-all?assignmentId={id}` — Chấm lại toàn bộ
+
+Không cần body. Hủy job cũ và tạo job mới cho **tất cả** bài nộp của lab đó.
+
+**Query param:** `assignmentId` (guid) — bắt buộc
+
+**Response `data`:**
+```json
+{ "queued": 25 }
+```
+
+> Dùng sau khi sửa test case hoặc deploy code mới của worker — regrade toàn lớp chỉ một lần gọi.
 
 ---
 
@@ -484,6 +500,11 @@ POST   /lab-assignments/{id}/grade          ← chấm lại
 **Nếu một bài bị Error và muốn chấm lại:**
 ```
 POST /lab-submissions/{id}/regrade
+```
+
+**Nếu muốn chấm lại toàn bộ bài nộp của lab (vd: sau khi sửa test case):**
+```
+POST /lab-submissions/regrade-all?assignmentId={id}
 ```
 
 ### Polling kết quả
