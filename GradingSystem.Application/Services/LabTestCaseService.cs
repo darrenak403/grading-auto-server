@@ -67,33 +67,29 @@ public class LabTestCaseService(IUnitOfWork uow) : ILabTestCaseService
         await uow.SaveChangesAsync(ct);
     }
 
-    public async Task<LabTestCaseDto> ApproveAsync(Guid id, CancellationToken ct = default)
+    public async Task<LabTestCaseDto> SetStatusAsync(Guid id, string status, CancellationToken ct = default)
     {
+        if (!Enum.TryParse<LabTestCaseStatus>(status, ignoreCase: true, out var newStatus))
+            throw new BadRequestException($"Invalid status '{status}'. Valid values: Draft, Approved, Rejected.");
+
         var tc = await uow.LabTestCases.GetByIdAsync(id)
             ?? throw new NotFoundException($"LabTestCase '{id}' not found.");
-        tc.Status = LabTestCaseStatus.Approved;
+
+        tc.Status = newStatus;
         tc.UpdatedAt = DateTime.UtcNow;
         uow.LabTestCases.Update(tc);
 
-        var assignment = await uow.LabAssignments.GetByIdAsync(tc.LabAssignmentId);
-        if (assignment is not null && assignment.Status == LabAssignmentStatus.Draft)
+        if (newStatus == LabTestCaseStatus.Approved)
         {
-            assignment.Status = LabAssignmentStatus.TestcasesReady;
-            assignment.UpdatedAt = DateTime.UtcNow;
-            uow.LabAssignments.Update(assignment);
+            var assignment = await uow.LabAssignments.GetByIdAsync(tc.LabAssignmentId);
+            if (assignment is not null && assignment.Status == LabAssignmentStatus.Draft)
+            {
+                assignment.Status = LabAssignmentStatus.TestcasesReady;
+                assignment.UpdatedAt = DateTime.UtcNow;
+                uow.LabAssignments.Update(assignment);
+            }
         }
 
-        await uow.SaveChangesAsync(ct);
-        return Map(tc);
-    }
-
-    public async Task<LabTestCaseDto> RejectAsync(Guid id, CancellationToken ct = default)
-    {
-        var tc = await uow.LabTestCases.GetByIdAsync(id)
-            ?? throw new NotFoundException($"LabTestCase '{id}' not found.");
-        tc.Status = LabTestCaseStatus.Rejected;
-        tc.UpdatedAt = DateTime.UtcNow;
-        uow.LabTestCases.Update(tc);
         await uow.SaveChangesAsync(ct);
         return Map(tc);
     }
@@ -134,6 +130,38 @@ public class LabTestCaseService(IUnitOfWork uow) : ILabTestCaseService
 
         await uow.SaveChangesAsync(ct);
         return created.Select(Map);
+    }
+
+    public async Task<int> ApproveAllAsync(Guid assignmentId, CancellationToken ct = default)
+    {
+        _ = await uow.LabAssignments.GetByIdAsync(assignmentId)
+            ?? throw new NotFoundException($"LabAssignment '{assignmentId}' not found.");
+
+        var drafts = (await uow.LabTestCases.FindAsync(t =>
+            t.LabAssignmentId == assignmentId &&
+            t.Status == LabTestCaseStatus.Draft))
+            .ToList();
+
+        if (drafts.Count == 0) return 0;
+
+        var now = DateTime.UtcNow;
+        foreach (var tc in drafts)
+        {
+            tc.Status = LabTestCaseStatus.Approved;
+            tc.UpdatedAt = now;
+            uow.LabTestCases.Update(tc);
+        }
+
+        var assignment = await uow.LabAssignments.GetByIdAsync(assignmentId);
+        if (assignment is not null && assignment.Status == LabAssignmentStatus.Draft)
+        {
+            assignment.Status = LabAssignmentStatus.TestcasesReady;
+            assignment.UpdatedAt = now;
+            uow.LabAssignments.Update(assignment);
+        }
+
+        await uow.SaveChangesAsync(ct);
+        return drafts.Count;
     }
 
     private static LabTestCaseDto Map(LabTestCase t) => new()

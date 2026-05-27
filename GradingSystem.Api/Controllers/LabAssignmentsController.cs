@@ -55,6 +55,15 @@ public class LabAssignmentsController(ILabAssignmentService service, ILabTestCas
         return Ok(result, "Test case created.");
     }
 
+    [HttpPatch("lab-assignments/{id:guid}/testcases/approve-all")]
+    public async Task<IActionResult> ApproveAllTestCasesAsync(Guid id, CancellationToken ct)
+    {
+        var count = await testCaseService.ApproveAllAsync(id, ct);
+        return Ok(new { Approved = count, Message = count == 0
+            ? "No draft test cases to approve."
+            : $"{count} test case(s) approved." });
+    }
+
     [HttpPost("lab-assignments/{id:guid}/grade")]
     public async Task<IActionResult> TriggerGradingAsync(Guid id, CancellationToken ct)
     {

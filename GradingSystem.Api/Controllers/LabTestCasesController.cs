@@ -27,18 +27,11 @@ public class LabTestCasesController(ILabTestCaseService service) : BaseApiContro
         return NoContent();
     }
 
-    [HttpPatch("lab-testcases/{id:guid}/approve")]
-    public async Task<IActionResult> ApproveAsync(Guid id, CancellationToken ct)
+    [HttpPatch("lab-testcases/{id:guid}/status")]
+    public async Task<IActionResult> SetStatusAsync(Guid id, [FromBody] SetLabTestCaseStatusRequest req, CancellationToken ct)
     {
-        var result = await service.ApproveAsync(id, ct);
-        return Ok(result, "Test case approved.");
-    }
-
-    [HttpPatch("lab-testcases/{id:guid}/reject")]
-    public async Task<IActionResult> RejectAsync(Guid id, CancellationToken ct)
-    {
-        var result = await service.RejectAsync(id, ct);
-        return Ok(result, "Test case rejected.");
+        var result = await service.SetStatusAsync(id, req.Status, ct);
+        return Ok(result, $"Test case status set to '{req.Status}'.");
     }
 
     [HttpPost("lab-assignments/{id:guid}/testcases/batch")]

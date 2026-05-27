@@ -1,5 +1,7 @@
 namespace GradingSystem.Application.DTOs;
 
+public record SetLabTestCaseStatusRequest(string Status);
+
 public record CreateLabTestCaseRequest(
     string HttpMethod,
     string UrlTemplate,

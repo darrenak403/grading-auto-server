@@ -16,11 +16,28 @@ public class LabGradingWorker(
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
         logger.LogInformation("LabGradingWorker started — recovering pending jobs");
-        await RecoverPendingJobsAsync(ct);
+
+        try
+        {
+            await RecoverPendingJobsAsync(ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError(ex, "LabGradingWorker: recovery pass failed — will retry on next poll");
+        }
 
         while (!ct.IsCancellationRequested)
         {
-            await EnqueuePendingJobsAsync(ct);
+            try
+            {
+                await EnqueuePendingJobsAsync(ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogError(ex, "LabGradingWorker: poll cycle failed — will retry in {Interval}s",
+                    opts.Value.PollIntervalSeconds);
+            }
+
             await Task.Delay(TimeSpan.FromSeconds(opts.Value.PollIntervalSeconds), ct);
         }
     }
@@ -66,8 +83,21 @@ public class LabGradingWorker(
 
         foreach (var job in pending)
         {
-            await bus.Publish(new LabGradeJobMessage(job.Id), ct);
-            logger.LogInformation("Enqueued lab job {JobId}", job.Id);
+            // Mark Running before publish so subsequent poll cycles skip it.
+            // If publish fails the job stays Running — RecoverPendingJobsAsync resets stale Running on next startup.
+            job.Status = LabGradingJobStatus.Running;
+            uow.LabGradingJobs.Update(job);
+            await uow.SaveChangesAsync(ct);
+
+            try
+            {
+                await bus.Publish(new LabGradeJobMessage(job.Id), ct);
+                logger.LogInformation("Enqueued lab job {JobId}", job.Id);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogError(ex, "Failed to publish lab job {JobId} — status stays Running, will recover on next startup", job.Id);
+            }
         }
     }
 }

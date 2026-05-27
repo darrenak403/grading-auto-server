@@ -4,7 +4,6 @@ version: '3'
 
 vars:
   COMPOSE: docker compose --env-file docker/.env.local -f docker/docker-compose.dev.yml
-  COMPOSE_APP: '{{.COMPOSE}} --profile app'
   API_DIR: GradingSystem.Api
   WORKER_DIR: GradingSystem.Worker
 
@@ -16,72 +15,54 @@ tasks:
       - task --list
       - |
         echo ""
-        echo "1. Tao docker/.env.local (xem docker/.env.example)"
-        echo "2. task docker:up"
-        echo "3. task run  +  task run:worker"
-        echo "Doi code image: task docker:build"
-        echo "Doc: BE.md"
+        echo "Setup lần đầu:"
+        echo "  1. cp docker/.env.example docker/.env.local  (rồi điền giá trị)"
+        echo "  2. task up"
+        echo "  3. task api   (terminal 1)"
+        echo "  4. task worker  (terminal 2)"
+        echo ""
+        echo "Swagger: http://localhost:5049/swagger"
+        echo "pgWeb:   http://localhost:8081"
+        echo "Rabbit:  http://localhost:15672"
 
-  docker:build:
-    desc: Build image API + Worker (chạy lại khi đổi code)
-    deps: [_env:local]
-    cmds:
-      - mkdir -p storage
-      - '{{.COMPOSE_APP}} build'
-
-  docker:up:
-    desc: Infra Docker — Postgres, SQL Server, RabbitMQ, pgWeb (không build)
-    deps: [_env:local]
+  up:
+    desc: Khởi động infra (Postgres, SQL Server, RabbitMQ, pgWeb)
+    deps: [_env]
     cmds:
       - mkdir -p storage
       - '{{.COMPOSE}} up -d --no-build'
-      - |
-        echo ""
-        echo "Postgres host port: xem POSTGRES_PUBLISH_PORT trong docker/.env.local"
-        echo "pgWeb:  http://localhost:8081"
-        echo "Rabbit: http://localhost:15672"
-        echo "App:    task run + task run:worker  ->  http://localhost:5049/swagger"
 
-  docker:down:
-    desc: Tắt infra Docker
-    deps: [_env:local]
+  down:
+    desc: Tắt infra
+    deps: [_env]
     cmd: '{{.COMPOSE}} down'
 
-  docker:logs:
-    desc: Log infra Docker
-    deps: [_env:local]
+  logs:
+    desc: Xem log infra
+    deps: [_env]
     cmd: '{{.COMPOSE}} logs -f --tail=100'
 
-  run:
-    desc: API local — :5049/swagger
+  api:
+    desc: Chạy API — http://localhost:5049/swagger
     dir: '{{.API_DIR}}'
     interactive: true
     dotenv: ['../docker/.env.local']
     env:
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_URLS: http://localhost:5049
-      AWS__AccessKey: '{{.AWS_ACCESS_KEY}}'
-      AWS__SecretKey: '{{.AWS_SECRET_KEY}}'
-      AWS__Region: '{{.AWS_REGION | default "us-east-1"}}'
-      AWS__BedrockModelId: '{{.AWS_BEDROCK_MODEL_ID | default "anthropic.claude-3-5-sonnet-20241022-v2:0"}}'
     cmd: dotnet run
 
-  run:worker:
-    desc: Worker local
+  worker:
+    desc: Chạy Worker (grading background service)
     dir: '{{.WORKER_DIR}}'
     interactive: true
     dotenv: ['../docker/.env.local']
     env:
-      DOTNET_ENVIRONMENT: Development
       ASPNETCORE_ENVIRONMENT: Development
-      AWS__AccessKey: '{{.AWS_ACCESS_KEY}}'
-      AWS__SecretKey: '{{.AWS_SECRET_KEY}}'
-      AWS__Region: '{{.AWS_REGION | default "us-east-1"}}'
-      AWS__BedrockModelId: '{{.AWS_BEDROCK_MODEL_ID | default "anthropic.claude-3-5-sonnet-20241022-v2:0"}}'
     cmd: dotnet run
 
-  _env:local:
+  _env:
     internal: true
     preconditions:
       - sh: test -f docker/.env.local
-        msg: 'Thieu docker/.env.local — copy tu docker/.env.example'
+        msg: 'Thiếu docker/.env.local — chạy: cp docker/.env.example docker/.env.local'
