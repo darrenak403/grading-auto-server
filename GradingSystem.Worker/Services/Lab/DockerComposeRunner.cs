@@ -43,7 +43,8 @@ public class DockerComposeRunner(
         var apiPort = PickPort(opts.Value.LabApiPortRangeStart, opts.Value.LabApiPortRangeEnd);
 
         StripHostPorts(composeDir);
-        WriteOverride(composeDir, apiPort);
+        var (serviceName, containerPort) = DetectApiService(composePath);
+        WriteOverride(composeDir, apiPort, serviceName, containerPort);
         _composeDirs[jobId] = composeDir;
 
         await RunDockerComposeAsync(composeDir, jobId, ct, "up", "-d", "--build");
@@ -160,15 +161,96 @@ public class DockerComposeRunner(
         }
     }
 
-    // Writes our override: only exposes the API service on a dynamic host port.
-    // Service name "api" is the convention; DB stays internal (no host port).
-    private static void WriteOverride(string composeDir, int apiPort)
+    // Parses the student's docker-compose.yml to find which service exposes a known HTTP port.
+    // Returns (serviceName, containerPort). Falls back to ("api", 8080) if nothing detected.
+    private (string ServiceName, int ContainerPort) DetectApiService(string composeFile)
+    {
+        // Known HTTP ports students typically expose
+        var httpPorts = new[] { 8080, 5000, 80, 5001, 3000 };
+
+        var lines = File.ReadAllLines(composeFile);
+
+        // Regex: top-level service name (no leading spaces, ends with colon, not a compose key)
+        var serviceNameRx = new System.Text.RegularExpressions.Regex(@"^([a-zA-Z][a-zA-Z0-9_\-]*):\s*$");
+        // Regex: port entry like "- 8080:8080", "- '5000:5000'", "- 5000" (bare container port), "- HOST:CONTAINER"
+        var portEntryRx   = new System.Text.RegularExpressions.Regex(@"^\s*-\s*['""]?(?:\d+:)?(\d+)['""]?\s*$");
+
+        // Top-level compose keys that are NOT service names
+        var composeTopKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            { "version", "services", "networks", "volumes", "configs", "secrets", "x-" };
+
+        string? currentService = null;
+        bool inServices = false;
+        bool inPortsBlock = false;
+
+        foreach (var rawLine in lines)
+        {
+            var line = rawLine.TrimEnd();
+            if (string.IsNullOrWhiteSpace(line)) continue;
+
+            // Detect "services:" top-level key
+            if (line.TrimStart() == "services:" && !rawLine.StartsWith(" "))
+            {
+                inServices = true;
+                inPortsBlock = false;
+                currentService = null;
+                continue;
+            }
+
+            if (!inServices) continue;
+
+            // Detect service-level key (single indent level, e.g. "  api:")
+            var svcMatch = System.Text.RegularExpressions.Regex.Match(rawLine, @"^( {2}|\t)([a-zA-Z][a-zA-Z0-9_\-]*):\s*$");
+            if (svcMatch.Success)
+            {
+                currentService = svcMatch.Groups[2].Value;
+                inPortsBlock = false;
+                continue;
+            }
+
+            // Detect "    ports:" under current service
+            if (currentService is not null && System.Text.RegularExpressions.Regex.IsMatch(rawLine, @"^ {4}ports:\s*$"))
+            {
+                inPortsBlock = true;
+                continue;
+            }
+
+            // Once inside ports block, scan port entries
+            if (inPortsBlock && currentService is not null)
+            {
+                var portMatch = portEntryRx.Match(rawLine);
+                if (portMatch.Success && int.TryParse(portMatch.Groups[1].Value, out var containerPort))
+                {
+                    if (httpPorts.Contains(containerPort))
+                    {
+                        logger.LogInformation(
+                            "Detected API service '{Service}' on container port {Port} from docker-compose.yml",
+                            currentService, containerPort);
+                        return (currentService, containerPort);
+                    }
+                }
+                // Stop scanning ports block when indentation drops back
+                else if (!rawLine.StartsWith("      ") && !rawLine.StartsWith("\t\t\t"))
+                {
+                    inPortsBlock = false;
+                }
+            }
+        }
+
+        logger.LogWarning(
+            "Could not detect API service/port from docker-compose.yml — falling back to service='api', port=8080. " +
+            "Ensure your service exposes one of: 80, 8080, 5000, 5001, 3000.");
+        return ("api", 8080);
+    }
+
+    // Writes our override: exposes the detected API service on a dynamic host port.
+    private static void WriteOverride(string composeDir, int apiPort, string serviceName, int containerPort)
     {
         var content =
             "services:\n" +
-            "  api:\n" +
+            $"  {serviceName}:\n" +
             "    ports:\n" +
-            $"      - \"{apiPort}:8080\"\n";
+            $"      - \"{apiPort}:{containerPort}\"\n";
 
         try
         {
