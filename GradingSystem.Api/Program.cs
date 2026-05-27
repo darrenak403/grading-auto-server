@@ -92,6 +92,7 @@ else
 var app = builder.Build();
 
 app.UseMiddleware<GlobalExceptionMiddleware>();
+app.UseMiddleware<JsonBodyFixerMiddleware>();
 
 using (var scope = app.Services.CreateScope())
 {
