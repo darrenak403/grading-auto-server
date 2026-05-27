@@ -98,6 +98,148 @@ public class LabAssignmentService(IUnitOfWork uow) : ILabAssignmentService
         return testCases.OrderBy(t => t.Order).Select(MapTestCase);
     }
 
+    public async Task<IReadOnlyList<LabAssignmentRosterItemDto>> GetRosterAsync(Guid id, CancellationToken ct = default)
+    {
+        _ = await uow.LabAssignments.GetByIdAsync(id)
+            ?? throw new NotFoundException($"LabAssignment '{id}' not found.");
+
+        var submissions = (await uow.LabSubmissions.FindAsync(s => s.LabAssignmentId == id))
+            .OrderBy(s => s.StudentCode)
+            .ToList();
+        if (submissions.Count == 0) return [];
+
+        var approvedTestCases = await uow.LabTestCases.FindAsync(t =>
+            t.LabAssignmentId == id && t.Status == LabTestCaseStatus.Approved);
+        var maxScore = approvedTestCases.Sum(t => t.Score);
+
+        var submissionIds = submissions.Select(s => s.Id).ToHashSet();
+        var jobs = await uow.LabGradingJobs.FindAsync(j => submissionIds.Contains(j.LabSubmissionId));
+
+        var latestJobBySubmission = jobs
+            .GroupBy(j => j.LabSubmissionId)
+            .ToDictionary(
+                g => g.Key,
+                g => g.OrderByDescending(j => j.CreatedAt).ThenByDescending(j => j.Id).First());
+
+        var latestJobIds = latestJobBySubmission.Values.Select(j => j.Id).ToHashSet();
+        var latestResults = latestJobIds.Count == 0
+            ? []
+            : await uow.LabTestCaseResults.FindAsync(r => latestJobIds.Contains(r.LabGradingJobId));
+        var totalScoreByJobId = latestResults
+            .GroupBy(r => r.LabGradingJobId)
+            .ToDictionary(g => g.Key, g => g.Sum(r => r.ManualOverrideScore ?? r.AwardedScore));
+
+        return submissions.Select(s =>
+        {
+            latestJobBySubmission.TryGetValue(s.Id, out var latestJob);
+            decimal? totalScore = null;
+            if (latestJob is not null &&
+                (latestJob.Status == LabGradingJobStatus.Done || latestJob.Status == LabGradingJobStatus.Failed) &&
+                totalScoreByJobId.TryGetValue(latestJob.Id, out var score))
+            {
+                totalScore = score;
+            }
+
+            return new LabAssignmentRosterItemDto
+            {
+                SubmissionId = s.Id,
+                StudentCode = s.StudentCode,
+                OriginalFileName = s.OriginalFileName,
+                SubmissionStatus = s.Status.ToString(),
+                LatestJobId = latestJob?.Id,
+                JobStatus = latestJob?.Status.ToString(),
+                TotalScore = totalScore,
+                MaxScore = maxScore,
+                CreatedAt = s.CreatedAt,
+                UpdatedAt = s.UpdatedAt
+            };
+        }).ToList();
+    }
+
+    public async Task<LabGradingProgressDto> GetGradingProgressAsync(Guid id, CancellationToken ct = default)
+    {
+        var assignment = await uow.LabAssignments.GetByIdAsync(id)
+            ?? throw new NotFoundException($"LabAssignment '{id}' not found.");
+
+        var submissions = (await uow.LabSubmissions.FindAsync(s => s.LabAssignmentId == id)).ToList();
+        var totalTestCaseCount = (await uow.LabTestCases.FindAsync(t =>
+            t.LabAssignmentId == id && t.Status == LabTestCaseStatus.Approved)).Count();
+
+        if (submissions.Count == 0)
+        {
+            return new LabGradingProgressDto
+            {
+                AssignmentId = assignment.Id,
+                AssignmentStatus = assignment.Status.ToString(),
+                TotalTestCaseCount = totalTestCaseCount
+            };
+        }
+
+        var submissionIds = submissions.Select(s => s.Id).ToHashSet();
+        var jobs = await uow.LabGradingJobs.FindAsync(j => submissionIds.Contains(j.LabSubmissionId));
+
+        var latestJobBySubmission = jobs
+            .GroupBy(j => j.LabSubmissionId)
+            .ToDictionary(
+                g => g.Key,
+                g => g.OrderByDescending(j => j.CreatedAt).ThenByDescending(j => j.Id).First());
+
+        LabGradingJob? runningJob = latestJobBySubmission.Values
+            .Where(j => j.Status == LabGradingJobStatus.Running)
+            .OrderBy(j => j.StartedAt ?? j.CreatedAt)
+            .ThenBy(j => j.CreatedAt)
+            .FirstOrDefault();
+
+        if (runningJob is null)
+        {
+            runningJob = latestJobBySubmission.Values
+                .Where(j => j.Status == LabGradingJobStatus.Pending)
+                .OrderBy(j => j.CreatedAt)
+                .FirstOrDefault();
+        }
+
+        var completedSubmissionCount = latestJobBySubmission.Values.Count(j =>
+            j.Status == LabGradingJobStatus.Done || j.Status == LabGradingJobStatus.Failed);
+        var pendingSubmissionCount = latestJobBySubmission.Values.Count(j => j.Status == LabGradingJobStatus.Pending);
+        var queuedSubmissionCount = pendingSubmissionCount -
+            (runningJob is not null && runningJob.Status == LabGradingJobStatus.Pending ? 1 : 0);
+
+        var runningSubmission = runningJob is null
+            ? null
+            : submissions.FirstOrDefault(s => s.Id == runningJob.LabSubmissionId);
+
+        var executedTestCaseCount = 0;
+        if (runningJob is not null)
+        {
+            executedTestCaseCount = (await uow.LabTestCaseResults
+                .FindAsync(r => r.LabGradingJobId == runningJob.Id))
+                .Count();
+        }
+
+        var runningPercent = 0;
+        if (runningJob is not null && totalTestCaseCount > 0)
+        {
+            runningPercent = (int)Math.Round(executedTestCaseCount * 100d / totalTestCaseCount);
+            runningPercent = Math.Clamp(runningPercent, 0, 100);
+        }
+
+        return new LabGradingProgressDto
+        {
+            AssignmentId = assignment.Id,
+            AssignmentStatus = assignment.Status.ToString(),
+            RunningSubmissionId = runningSubmission?.Id,
+            RunningStudentCode = runningSubmission?.StudentCode,
+            RunningJobId = runningJob?.Id,
+            RunningJobStatus = runningJob?.Status.ToString(),
+            RunningPercent = runningPercent,
+            ExecutedTestCaseCount = executedTestCaseCount,
+            TotalTestCaseCount = totalTestCaseCount,
+            QueuedSubmissionCount = Math.Max(0, queuedSubmissionCount),
+            CompletedSubmissionCount = completedSubmissionCount,
+            IsGradingActive = runningJob is not null
+        };
+    }
+
     public async Task<int> TriggerGradingAsync(Guid id, CancellationToken ct = default)
     {
         var assignment = await uow.LabAssignments.GetByIdAsync(id)

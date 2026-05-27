@@ -48,6 +48,20 @@ public class LabAssignmentsController(ILabAssignmentService service, ILabTestCas
         return Ok(result);
     }
 
+    [HttpGet("lab-assignments/{id:guid}/roster")]
+    public async Task<IActionResult> GetRosterAsync(Guid id, CancellationToken ct)
+    {
+        var result = await service.GetRosterAsync(id, ct);
+        return Ok(result);
+    }
+
+    [HttpGet("lab-assignments/{id:guid}/grading-progress")]
+    public async Task<IActionResult> GetGradingProgressAsync(Guid id, CancellationToken ct)
+    {
+        var result = await service.GetGradingProgressAsync(id, ct);
+        return Ok(result);
+    }
+
     [HttpPost("lab-assignments/{id:guid}/testcases")]
     public async Task<IActionResult> CreateTestCaseAsync(Guid id, [FromBody] CreateLabTestCaseRequest req, CancellationToken ct)
     {

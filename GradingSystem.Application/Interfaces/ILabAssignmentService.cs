@@ -10,5 +10,7 @@ public interface ILabAssignmentService
     Task<LabAssignmentDto> UpdateAsync(Guid id, UpdateLabAssignmentRequest req, CancellationToken ct = default);
     Task DeleteAsync(Guid id, CancellationToken ct = default);
     Task<IEnumerable<LabTestCaseDto>> GetTestCasesAsync(Guid id, CancellationToken ct = default);
+    Task<IReadOnlyList<LabAssignmentRosterItemDto>> GetRosterAsync(Guid id, CancellationToken ct = default);
+    Task<LabGradingProgressDto> GetGradingProgressAsync(Guid id, CancellationToken ct = default);
     Task<int> TriggerGradingAsync(Guid id, CancellationToken ct = default);
 }
