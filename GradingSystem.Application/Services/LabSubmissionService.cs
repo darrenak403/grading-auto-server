@@ -44,10 +44,15 @@ public class LabSubmissionService(IUnitOfWork uow, IConfiguration config) : ILab
             var nameWithoutExt = Path.GetFileNameWithoutExtension(file.FileName);
             if (!nameWithoutExt.Contains('_'))
             {
-                warnings.Add($"Skipped '{file.FileName}': filename must contain '_' separator (e.g. SE180234_Name.zip)");
+                warnings.Add($"Skipped '{file.FileName}': filename must contain '_' separator (e.g. Lab1_SE180234.zip)");
                 continue;
             }
-            var studentCode = nameWithoutExt.Split('_')[0];
+            var studentCode = nameWithoutExt.Split('_')[1];
+            if (string.IsNullOrWhiteSpace(studentCode))
+            {
+                warnings.Add($"Skipped '{file.FileName}': could not extract student code — expected format Lab1_SE180234.zip");
+                continue;
+            }
             if (!seenCodes.Add(studentCode))
             {
                 warnings.Add($"Skipped '{file.FileName}': duplicate student code '{studentCode}' in this batch.");
