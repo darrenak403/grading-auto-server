@@ -16,4 +16,10 @@ public class WorkerOptions
     public int LabDbPortRangeStart { get; set; } = 14000;
     public int LabDbPortRangeEnd { get; set; } = 14999;
     public int LabDockerHealthCheckTimeoutSeconds { get; set; } = 60;
+
+    // Lab Docker timeouts and resource limits
+    public int LabDockerBuildTimeoutSeconds { get; set; } = 300;   // 5 min for build + start
+    public int LabDockerDownTimeoutSeconds { get; set; } = 30;
+    public string LabContainerMemoryLimit { get; set; } = "512m";
+    public double LabContainerCpuLimit { get; set; } = 1.0;
 }

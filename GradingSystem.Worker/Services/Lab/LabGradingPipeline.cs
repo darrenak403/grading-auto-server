@@ -79,7 +79,7 @@ public class LabGradingPipeline(
         try
         {
             // Phase 1: Extract archive — SOURCE checks need this, always runs first
-            var workDir = docker.Extract(submission.FilePath, jobId);
+            var workDir = DockerComposeRunner.Extract(submission.FilePath, jobId);
 
             // Phase 2: SOURCE checks — file-system only, no Docker needed
             foreach (var tc in sourceTests)

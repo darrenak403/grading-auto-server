@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.IO.Compression;
 using System.Net.Sockets;
 using System.Security;
+using System.Text.RegularExpressions;
 using GradingSystem.Worker.Options;
 using Microsoft.Extensions.Options;
 using SharpCompress.Archives;
@@ -13,15 +14,27 @@ namespace GradingSystem.Worker.Services.Lab;
 public class DockerComposeException(string message, Exception? inner = null) : Exception(message, inner);
 public class DockerComposeTimeoutException(string message) : Exception(message);
 
-public class DockerComposeRunner(
+public partial class DockerComposeRunner(
     IOptions<WorkerOptions> opts,
     ILogger<DockerComposeRunner> logger)
 {
     private static readonly string WorkRoot = Path.Combine(Path.GetTempPath(), "lab-grading");
     private readonly ConcurrentDictionary<Guid, string> _composeDirs = new();
 
+    [GeneratedRegex(@"^([ \t]+)ports:[ \t]*\r?\n(?:[ \t]+-[^\r\n]*\r?\n)*", RegexOptions.Multiline)]
+    private static partial Regex PortsBlockRegex();
+
+    [GeneratedRegex(@"^\s*-\s*['""]?(?:\d+:)?(\d+)['""]?\s*$")]
+    private static partial Regex PortEntryRegex();
+
+    [GeneratedRegex(@"^( {2}|\t)([a-zA-Z][a-zA-Z0-9_\-]*):\s*$")]
+    private static partial Regex ServiceIndentRegex();
+
+    [GeneratedRegex(@"^ {4}ports:\s*$")]
+    private static partial Regex PortsKeyRegex();
+
     /// <summary>Extracts the submission archive to a temp workdir. Returns the workdir path.</summary>
-    public string Extract(string archivePath, Guid jobId)
+    public static string Extract(string archivePath, Guid jobId)
     {
         var workDir = Path.Combine(WorkRoot, jobId.ToString());
         Directory.CreateDirectory(workDir);
@@ -44,7 +57,8 @@ public class DockerComposeRunner(
 
         StripHostPorts(composeDir);
         var (serviceName, containerPort) = DetectApiService(composePath);
-        WriteOverride(composeDir, apiPort, serviceName, containerPort);
+        WriteOverride(composeDir, apiPort, serviceName, containerPort,
+            opts.Value.LabContainerMemoryLimit, opts.Value.LabContainerCpuLimit);
         _composeDirs[jobId] = composeDir;
 
         await RunDockerComposeAsync(composeDir, jobId, ct, "up", "-d", "--build");
@@ -81,7 +95,16 @@ public class DockerComposeRunner(
 
         var proc = Process.Start(psi);
         if (proc is not null)
-            await proc.WaitForExitAsync(CancellationToken.None);
+        {
+            using var cts = new CancellationTokenSource(
+                TimeSpan.FromSeconds(opts.Value.LabDockerDownTimeoutSeconds));
+            try { await proc.WaitForExitAsync(cts.Token); }
+            catch (OperationCanceledException)
+            {
+                try { proc.Kill(entireProcessTree: true); } catch { /* best effort */ }
+                logger.LogWarning("docker compose down timed out for job {JobId} — process killed", jobId);
+            }
+        }
 
         var workDir = Path.Combine(WorkRoot, jobId.ToString());
         try
@@ -116,8 +139,9 @@ public class DockerComposeRunner(
 
         var proc = Process.Start(psi);
         if (proc is null) return string.Empty;
-        var output = await proc.StandardOutput.ReadToEndAsync();
-        await proc.WaitForExitAsync(CancellationToken.None);
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var output = await proc.StandardOutput.ReadToEndAsync(cts.Token);
+        await proc.WaitForExitAsync(cts.Token);
         return output;
     }
 
@@ -148,15 +172,10 @@ public class DockerComposeRunner(
     // Docker Compose rejects with "must be a array".
     private static void StripHostPorts(string composeDir)
     {
-        // Matches: indented "ports:" line followed by zero-or-more "  - ..." child lines
-        var portsBlock = new System.Text.RegularExpressions.Regex(
-            @"^([ \t]+)ports:[ \t]*\r?\n(?:[ \t]+-[^\r\n]*\r?\n)*",
-            System.Text.RegularExpressions.RegexOptions.Multiline);
-
         foreach (var file in Directory.EnumerateFiles(composeDir, "docker-compose*.yml"))
         {
             var content = File.ReadAllText(file);
-            var stripped = portsBlock.Replace(content, string.Empty);
+            var stripped = PortsBlockRegex().Replace(content, string.Empty);
             if (!ReferenceEquals(stripped, content))
                 File.WriteAllText(file, stripped);
         }
@@ -171,15 +190,6 @@ public class DockerComposeRunner(
 
         var lines = File.ReadAllLines(composeFile);
 
-        // Regex: top-level service name (no leading spaces, ends with colon, not a compose key)
-        var serviceNameRx = new System.Text.RegularExpressions.Regex(@"^([a-zA-Z][a-zA-Z0-9_\-]*):\s*$");
-        // Regex: port entry like "- 8080:8080", "- '5000:5000'", "- 5000" (bare container port), "- HOST:CONTAINER"
-        var portEntryRx   = new System.Text.RegularExpressions.Regex(@"^\s*-\s*['""]?(?:\d+:)?(\d+)['""]?\s*$");
-
-        // Top-level compose keys that are NOT service names
-        var composeTopKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-            { "version", "services", "networks", "volumes", "configs", "secrets", "x-" };
-
         string? currentService = null;
         bool inServices = false;
         bool inPortsBlock = false;
@@ -190,7 +200,7 @@ public class DockerComposeRunner(
             if (string.IsNullOrWhiteSpace(line)) continue;
 
             // Detect "services:" top-level key
-            if (line.TrimStart() == "services:" && !rawLine.StartsWith(" "))
+            if (line.TrimStart() == "services:" && !rawLine.StartsWith(' '))
             {
                 inServices = true;
                 inPortsBlock = false;
@@ -201,7 +211,7 @@ public class DockerComposeRunner(
             if (!inServices) continue;
 
             // Detect service-level key (single indent level, e.g. "  api:")
-            var svcMatch = System.Text.RegularExpressions.Regex.Match(rawLine, @"^( {2}|\t)([a-zA-Z][a-zA-Z0-9_\-]*):\s*$");
+            var svcMatch = ServiceIndentRegex().Match(rawLine);
             if (svcMatch.Success)
             {
                 currentService = svcMatch.Groups[2].Value;
@@ -210,7 +220,7 @@ public class DockerComposeRunner(
             }
 
             // Detect "    ports:" under current service
-            if (currentService is not null && System.Text.RegularExpressions.Regex.IsMatch(rawLine, @"^ {4}ports:\s*$"))
+            if (currentService is not null && PortsKeyRegex().IsMatch(rawLine))
             {
                 inPortsBlock = true;
                 continue;
@@ -219,7 +229,7 @@ public class DockerComposeRunner(
             // Once inside ports block, scan port entries
             if (inPortsBlock && currentService is not null)
             {
-                var portMatch = portEntryRx.Match(rawLine);
+                var portMatch = PortEntryRegex().Match(rawLine);
                 if (portMatch.Success && int.TryParse(portMatch.Groups[1].Value, out var containerPort))
                 {
                     if (httpPorts.Contains(containerPort))
@@ -231,7 +241,7 @@ public class DockerComposeRunner(
                     }
                 }
                 // Stop scanning ports block when indentation drops back
-                else if (!rawLine.StartsWith("      ") && !rawLine.StartsWith("\t\t\t"))
+                else if (!rawLine.StartsWith("      ") && !rawLine.StartsWith('\t'))
                 {
                     inPortsBlock = false;
                 }
@@ -244,14 +254,20 @@ public class DockerComposeRunner(
         return ("api", 8080);
     }
 
-    // Writes our override: exposes the detected API service on a dynamic host port.
-    private static void WriteOverride(string composeDir, int apiPort, string serviceName, int containerPort)
+    // Writes our override: exposes the detected API service on a dynamic host port + enforces resource limits.
+    private static void WriteOverride(string composeDir, int apiPort, string serviceName, int containerPort,
+        string memoryLimit, double cpuLimit)
     {
         var content =
             "services:\n" +
             $"  {serviceName}:\n" +
             "    ports:\n" +
-            $"      - \"{apiPort}:{containerPort}\"\n";
+            $"      - \"{apiPort}:{containerPort}\"\n" +
+            "    deploy:\n" +
+            "      resources:\n" +
+            "        limits:\n" +
+            $"          memory: {memoryLimit}\n" +
+            $"          cpus: '{cpuLimit:F1}'\n";
 
         try
         {
@@ -265,6 +281,10 @@ public class DockerComposeRunner(
 
     private async Task RunDockerComposeAsync(string composeDir, Guid jobId, CancellationToken ct, params string[] args)
     {
+        using var buildTimeout = new CancellationTokenSource(
+            TimeSpan.FromSeconds(opts.Value.LabDockerBuildTimeoutSeconds));
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, buildTimeout.Token);
+
         var psi = new ProcessStartInfo("docker")
         {
             WorkingDirectory = composeDir,
@@ -277,8 +297,18 @@ public class DockerComposeRunner(
         foreach (var a in args) psi.ArgumentList.Add(a);
 
         var proc = Process.Start(psi) ?? throw new DockerComposeException("Failed to start docker compose process.");
-        var stderr = await proc.StandardError.ReadToEndAsync(ct);
-        await proc.WaitForExitAsync(ct);
+        string stderr;
+        try
+        {
+            stderr = await proc.StandardError.ReadToEndAsync(linked.Token);
+            await proc.WaitForExitAsync(linked.Token);
+        }
+        catch (OperationCanceledException) when (buildTimeout.IsCancellationRequested)
+        {
+            try { proc.Kill(entireProcessTree: true); } catch { /* best effort */ }
+            throw new DockerComposeTimeoutException(
+                $"docker compose {string.Join(' ', args)} timed out after {opts.Value.LabDockerBuildTimeoutSeconds}s.");
+        }
 
         if (proc.ExitCode != 0)
             throw new DockerComposeException($"docker compose {string.Join(' ', args)} failed (exit {proc.ExitCode}): {stderr}");
