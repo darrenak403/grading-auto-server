@@ -100,10 +100,10 @@ public class LabGradingPipeline(
             logger.LogInformation("Lab job {JobId} done — {Passed}/{Total} passed",
                 jobId, allResults.Count(r => r.Passed), allResults.Count);
         }
-        catch (DockerComposeTimeoutException ex)
+        catch (Exception ex) when (ex is DockerComposeException or DockerComposeTimeoutException)
         {
-            logger.LogWarning(ex, "Lab job {JobId} timed out starting Docker", jobId);
-            allResults.AddRange(FailRemaining(httpTests, allResults, jobId, $"Docker timed out: {ex.Message}"));
+            logger.LogWarning(ex, "Lab job {JobId} Docker failed: {Message}", jobId, ex.Message);
+            allResults.AddRange(FailRemaining(httpTests, allResults, jobId, ex.Message));
             uow.ClearChanges();
             job        = (await uow.LabGradingJobs.GetByIdAsync(jobId))!;
             submission = (await uow.LabSubmissions.GetByIdAsync(job.LabSubmissionId))!;
@@ -113,7 +113,7 @@ public class LabGradingPipeline(
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Lab job {JobId} failed", jobId);
+            logger.LogError(ex, "Lab job {JobId} unexpected error", jobId);
             allResults.AddRange(FailRemaining(testCases, allResults, jobId, ex.Message));
             uow.ClearChanges();
             job        = (await uow.LabGradingJobs.GetByIdAsync(jobId))!;

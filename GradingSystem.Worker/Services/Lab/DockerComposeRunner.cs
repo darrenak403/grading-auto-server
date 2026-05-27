@@ -41,9 +41,9 @@ public class DockerComposeRunner(
             throw new SecurityException($"docker-compose.yml found outside workDir: {composeDir}");
 
         var apiPort = PickPort(opts.Value.LabApiPortRangeStart, opts.Value.LabApiPortRangeEnd);
-        var dbPort  = PickPort(opts.Value.LabDbPortRangeStart,  opts.Value.LabDbPortRangeEnd);
 
-        WriteOverride(composeDir, apiPort, dbPort);
+        StripHostPorts(composeDir);
+        WriteOverride(composeDir, apiPort);
         _composeDirs[jobId] = composeDir;
 
         await RunDockerComposeAsync(composeDir, jobId, ct, "up", "-d", "--build");
@@ -141,17 +141,34 @@ public class DockerComposeRunner(
         }
     }
 
-    private static void WriteOverride(string composeDir, int apiPort, int dbPort)
+    // Strips all host-port bindings (e.g. "1433:1433") from every docker-compose*.yml in composeDir
+    // so they don't conflict with ports already in use on the host machine.
+    // DB containers remain accessible internally via the compose network.
+    private static void StripHostPorts(string composeDir)
+    {
+        // Matches port binding list items: - "HOST:CONTAINER" or - HOST:CONTAINER (with optional quotes/spaces)
+        var hostPortLine = new System.Text.RegularExpressions.Regex(
+            @"^\s*-\s*[""']?\d+:\d+[""']?\s*$",
+            System.Text.RegularExpressions.RegexOptions.Multiline);
+
+        foreach (var file in Directory.EnumerateFiles(composeDir, "docker-compose*.yml"))
+        {
+            var content = File.ReadAllText(file);
+            var stripped = hostPortLine.Replace(content, string.Empty);
+            if (!ReferenceEquals(stripped, content))
+                File.WriteAllText(file, stripped);
+        }
+    }
+
+    // Writes our override: only exposes the API service on a dynamic host port.
+    // Service name "api" is the convention; DB stays internal (no host port).
+    private static void WriteOverride(string composeDir, int apiPort)
     {
         var content =
-            "version: '3.8'\n" +
             "services:\n" +
             "  api:\n" +
             "    ports:\n" +
-            $"      - \"{apiPort}:8080\"\n" +
-            "  db:\n" +
-            "    ports:\n" +
-            $"      - \"{dbPort}:1433\"\n";
+            $"      - \"{apiPort}:8080\"\n";
 
         try
         {

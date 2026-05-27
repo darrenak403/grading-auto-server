@@ -69,14 +69,16 @@ public class SourceAnalyzer
             : (false, $"No .csproj matching '{pattern}' found in archive.");
     }
 
-    // project-count:3  →  archive contains exactly N .csproj files
+    // project-count:3  →  archive contains exactly N .csproj files (ignores macOS ._* metadata files)
     private static (bool, string) CheckProjectCount(string workDir, string args)
     {
         if (!int.TryParse(args.Trim(), out var expected))
             return (false, $"Invalid count '{args}' — must be an integer.");
         var files = Directory
             .EnumerateFiles(workDir, "*.csproj", SearchOption.AllDirectories)
-            .Select(Path.GetFileName).ToList();
+            .Select(Path.GetFileName)
+            .Where(f => !f!.StartsWith("._", StringComparison.Ordinal))
+            .ToList();
         return files.Count == expected
             ? (true,  $"Found {files.Count} project(s): {string.Join(", ", files)}")
             : (false, $"Expected {expected} project(s), found {files.Count}: {string.Join(", ", files)}");
