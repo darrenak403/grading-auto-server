@@ -92,7 +92,7 @@ public class LabGradingPipeline(
 
             // Phase 3: Docker + HTTP checks
             var apiPort = await docker.StartContainersAsync(workDir, jobId, ct);
-            var httpResults = await testRunner.RunAsync($"http://localhost:{apiPort}", jobId, httpTests, ct);
+            var httpResults = await testRunner.RunAsync(docker.GetApiBaseUrl(apiPort), jobId, httpTests, ct);
             allResults.AddRange(httpResults);
 
             job.Status        = LabGradingJobStatus.Done;
@@ -136,8 +136,66 @@ public class LabGradingPipeline(
 
             try { await uow.SaveChangesAsync(CancellationToken.None); }
             catch (Exception ex) { logger.LogError(ex, "Final save failed for job {JobId}", jobId); }
+
+            try
+            {
+                await RefreshSubmissionAndAssignmentStatusAsync(uow, submission.LabAssignmentId, submission.Id, job.Id);
+                await uow.SaveChangesAsync(CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Status refresh failed for lab job {JobId}", jobId);
+            }
         }
     }
+
+    private static async Task RefreshSubmissionAndAssignmentStatusAsync(
+        IUnitOfWork uow,
+        Guid assignmentId,
+        Guid submissionId,
+        Guid completedJobId)
+    {
+        var submission = await uow.LabSubmissions.GetByIdAsync(submissionId);
+        if (submission is not null)
+        {
+            var submissionJobs = (await uow.LabGradingJobs.FindAsync(j => j.LabSubmissionId == submissionId))
+                .OrderByDescending(j => j.CreatedAt)
+                .ThenByDescending(j => j.Id)
+                .ToList();
+            var latestJob = submissionJobs.FirstOrDefault();
+            if (latestJob is not null && latestJob.Id != completedJobId)
+            {
+                submission.Status = ToSubmissionStatus(latestJob);
+                submission.UpdatedAt = DateTime.UtcNow;
+                uow.LabSubmissions.Update(submission);
+            }
+        }
+
+        var assignment = await uow.LabAssignments.GetByIdAsync(assignmentId);
+        if (assignment is null) return;
+
+        var submissions = (await uow.LabSubmissions.FindAsync(s => s.LabAssignmentId == assignmentId)).ToList();
+        if (submissions.Count == 0) return;
+
+        var submissionIds = submissions.Select(s => s.Id).ToHashSet();
+        var allJobs = (await uow.LabGradingJobs.FindAsync(j => submissionIds.Contains(j.LabSubmissionId))).ToList();
+        if (allJobs.Count == 0) return;
+
+        assignment.Status = allJobs.Any(j => j.Status is LabGradingJobStatus.Pending or LabGradingJobStatus.Running)
+            ? LabAssignmentStatus.Grading
+            : LabAssignmentStatus.Done;
+        assignment.UpdatedAt = DateTime.UtcNow;
+        uow.LabAssignments.Update(assignment);
+    }
+
+    private static LabSubmissionStatus ToSubmissionStatus(LabGradingJob job) =>
+        job.Status switch
+        {
+            LabGradingJobStatus.Pending => LabSubmissionStatus.Pending,
+            LabGradingJobStatus.Running => LabSubmissionStatus.Grading,
+            LabGradingJobStatus.Done => LabSubmissionStatus.Done,
+            _ => LabSubmissionStatus.Error
+        };
 
     private static IEnumerable<LabTestCaseResult> FailRemaining(
         IEnumerable<LabTestCase> allTests,

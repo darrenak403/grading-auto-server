@@ -9,6 +9,6 @@ public interface ILabSubmissionService
     Task<LabBatchUploadResult> BatchUploadAsync(Guid assignmentId, IEnumerable<LabUploadFile> files, CancellationToken ct = default);
     Task DeleteAsync(Guid id, CancellationToken ct = default);
     Task<int> DeleteAllByAssignmentAsync(Guid assignmentId, CancellationToken ct = default);
-    Task RegradeAsync(Guid id, CancellationToken ct = default);
+    Task<bool> RegradeAsync(Guid id, CancellationToken ct = default);
     Task<int> RegradeAllAsync(Guid assignmentId, CancellationToken ct = default);
 }

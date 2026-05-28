@@ -2,6 +2,7 @@ using GradingSystem.Application.Interfaces;
 using GradingSystem.Application.Messaging;
 using GradingSystem.Domain.Entities;
 using GradingSystem.Worker.Options;
+using GradingSystem.Worker.Services.Lab;
 using MassTransit;
 using Microsoft.Extensions.Options;
 
@@ -11,6 +12,7 @@ public class LabGradingWorker(
     IServiceScopeFactory scopeFactory,
     IBus bus,
     IOptions<WorkerOptions> opts,
+    DockerComposeRunner docker,
     ILogger<LabGradingWorker> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken ct)
@@ -51,6 +53,9 @@ public class LabGradingWorker(
         var stale = (await uow.LabGradingJobs.FindAsync(j => j.Status == LabGradingJobStatus.Running)).ToList();
         foreach (var job in stale)
         {
+            try { await docker.StopAsync(job.Id); }
+            catch (Exception ex) { logger.LogWarning(ex, "Failed to clean stale Docker resources for lab job {JobId}", job.Id); }
+
             job.Status = LabGradingJobStatus.Pending;
             uow.LabGradingJobs.Update(job);
             logger.LogInformation("Reset stale Running lab job {JobId} → Pending", job.Id);
@@ -77,27 +82,38 @@ public class LabGradingWorker(
 
     private async Task PublishPendingAsync(IUnitOfWork uow, CancellationToken ct)
     {
-        var pending = (await uow.LabGradingJobs.FindAsync(j => j.Status == LabGradingJobStatus.Pending))
-            .OrderBy(j => j.CreatedAt)
-            .ToList();
-
-        foreach (var job in pending)
+        var running = (await uow.LabGradingJobs.FindAsync(j => j.Status == LabGradingJobStatus.Running))
+            .OrderBy(j => j.StartedAt ?? j.CreatedAt)
+            .ThenBy(j => j.CreatedAt)
+            .FirstOrDefault();
+        if (running is not null)
         {
-            // Mark Running before publish so subsequent poll cycles skip it.
-            // If publish fails the job stays Running — RecoverPendingJobsAsync resets stale Running on next startup.
-            job.Status = LabGradingJobStatus.Running;
+            logger.LogDebug("Lab job {JobId} is still running — waiting before publishing the next job", running.Id);
+            return;
+        }
+
+        var job = (await uow.LabGradingJobs.FindAsync(j => j.Status == LabGradingJobStatus.Pending))
+            .OrderBy(j => j.CreatedAt)
+            .FirstOrDefault();
+        if (job is null) return;
+
+        // Reserve exactly one job. The pipeline accepts Running jobs, and no next job is
+        // published until this one is saved as Done/Failed.
+        job.Status = LabGradingJobStatus.Running;
+        uow.LabGradingJobs.Update(job);
+        await uow.SaveChangesAsync(ct);
+
+        try
+        {
+            await bus.Publish(new LabGradeJobMessage(job.Id), ct);
+            logger.LogInformation("Enqueued lab job {JobId}", job.Id);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError(ex, "Failed to publish lab job {JobId} — resetting to Pending", job.Id);
+            job.Status = LabGradingJobStatus.Pending;
             uow.LabGradingJobs.Update(job);
             await uow.SaveChangesAsync(ct);
-
-            try
-            {
-                await bus.Publish(new LabGradeJobMessage(job.Id), ct);
-                logger.LogInformation("Enqueued lab job {JobId}", job.Id);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                logger.LogError(ex, "Failed to publish lab job {JobId} — status stays Running, will recover on next startup", job.Id);
-            }
         }
     }
 }

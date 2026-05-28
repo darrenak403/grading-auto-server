@@ -55,7 +55,14 @@ builder.Services.AddMassTransit(x =>
     {
         e.PrefetchCount = workerOpts.MaxConcurrentJobs;
     });
-    x.AddConsumer<LabGradeJobConsumer>();
+    x.AddConsumer<LabGradeJobConsumer>(c =>
+    {
+        c.UseConcurrentMessageLimit(1);
+    }).Endpoint(e =>
+    {
+        e.PrefetchCount = 1;
+        e.ConcurrentMessageLimit = 1;
+    });
 
     x.UsingRabbitMq((ctx, cfg) =>
     {

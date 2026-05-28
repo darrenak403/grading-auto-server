@@ -11,11 +11,12 @@ public class WorkerOptions
     public string BindHost { get; set; } = "127.0.0.1";
 
     // Lab Docker grading port ranges
+    public string LabApiHost { get; set; } = "localhost";
     public int LabApiPortRangeStart { get; set; } = 15000;
     public int LabApiPortRangeEnd { get; set; } = 16000;
     public int LabDbPortRangeStart { get; set; } = 14000;
     public int LabDbPortRangeEnd { get; set; } = 14999;
-    public int LabDockerHealthCheckTimeoutSeconds { get; set; } = 60;
+    public int LabDockerHealthCheckTimeoutSeconds { get; set; } = 120;
 
     // Lab Docker timeouts and resource limits
     public int LabDockerBuildTimeoutSeconds { get; set; } = 300;   // 5 min for build + start

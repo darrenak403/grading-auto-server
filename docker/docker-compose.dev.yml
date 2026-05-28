@@ -140,11 +140,12 @@ services:
       Worker__ArtifactPortRangeEnd: ${WORKER_ARTIFACT_PORT_RANGE_END:-7999}
       Worker__BindHost: ${WORKER_BIND_HOST:-127.0.0.1}
       Worker__NewmanExecutable: ${WORKER_NEWMAN_EXECUTABLE:-}
+      Worker__LabApiHost: ${WORKER_LAB_API_HOST:-host.docker.internal}
       Worker__LabApiPortRangeStart: ${WORKER_LAB_API_PORT_START:-15000}
       Worker__LabApiPortRangeEnd: ${WORKER_LAB_API_PORT_END:-16000}
       Worker__LabDbPortRangeStart: ${WORKER_LAB_DB_PORT_START:-14000}
       Worker__LabDbPortRangeEnd: ${WORKER_LAB_DB_PORT_END:-14999}
-      Worker__LabDockerHealthCheckTimeoutSeconds: ${WORKER_LAB_HEALTH_TIMEOUT:-60}
+      Worker__LabDockerHealthCheckTimeoutSeconds: ${WORKER_LAB_HEALTH_TIMEOUT:-120}
       Worker__LabDockerBuildTimeoutSeconds: ${WORKER_LAB_BUILD_TIMEOUT:-300}
       Worker__LabDockerDownTimeoutSeconds: ${WORKER_LAB_DOWN_TIMEOUT:-30}
       Worker__LabContainerMemoryLimit: ${WORKER_LAB_MEMORY_LIMIT:-512m}
@@ -152,6 +153,8 @@ services:
     volumes:
       - ../storage:/storage
       - /var/run/docker.sock:/var/run/docker.sock
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy

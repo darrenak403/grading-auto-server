@@ -91,64 +91,77 @@ public class LabSubmissionService(IUnitOfWork uow, IConfiguration config) : ILab
         return new LabBatchUploadResult { Created = created, Warnings = warnings };
     }
 
-    public async Task RegradeAsync(Guid id, CancellationToken ct = default)
+    public async Task<bool> RegradeAsync(Guid id, CancellationToken ct = default)
     {
         var submission = await uow.LabSubmissions.GetByIdAsync(id)
             ?? throw new NotFoundException($"LabSubmission '{id}' not found.");
 
-        // Cancel any active jobs so the new job won't be skipped
-        var activeJobs = (await uow.LabGradingJobs.FindAsync(j =>
-            j.LabSubmissionId == id &&
-            (j.Status == LabGradingJobStatus.Pending || j.Status == LabGradingJobStatus.Running)))
-            .ToList();
+        var assignment = await uow.LabAssignments.GetByIdAsync(submission.LabAssignmentId)
+            ?? throw new NotFoundException($"LabAssignment '{submission.LabAssignmentId}' not found.");
 
-        foreach (var job in activeJobs)
-        {
-            job.Status = LabGradingJobStatus.Failed;
-            job.ErrorMessage = "Cancelled — regrade requested.";
-            job.FinishedAt = DateTime.UtcNow;
-            uow.LabGradingJobs.Update(job);
-        }
+        // A Running job must be allowed to finish; a Pending job already represents the next run.
+        var hasPendingJob = (await uow.LabGradingJobs.FindAsync(j =>
+            j.LabSubmissionId == id &&
+            j.Status == LabGradingJobStatus.Pending))
+            .Any();
+        if (hasPendingJob) return false;
 
         submission.Status = LabSubmissionStatus.Pending;
         submission.UpdatedAt = DateTime.UtcNow;
         uow.LabSubmissions.Update(submission);
 
+        assignment.Status = LabAssignmentStatus.Grading;
+        assignment.UpdatedAt = DateTime.UtcNow;
+        uow.LabAssignments.Update(assignment);
+
         await uow.LabGradingJobs.AddAsync(new LabGradingJob { LabSubmissionId = id });
         await uow.SaveChangesAsync(ct);
+        return true;
     }
 
     public async Task<int> RegradeAllAsync(Guid assignmentId, CancellationToken ct = default)
     {
-        _ = await uow.LabAssignments.GetByIdAsync(assignmentId)
+        var assignment = await uow.LabAssignments.GetByIdAsync(assignmentId)
             ?? throw new NotFoundException($"LabAssignment '{assignmentId}' not found.");
 
-        var submissions = (await uow.LabSubmissions.FindAsync(s => s.LabAssignmentId == assignmentId)).ToList();
+        var submissions = (await uow.LabSubmissions.FindAsync(s => s.LabAssignmentId == assignmentId))
+            .OrderBy(s => s.StudentCode)
+            .ThenBy(s => s.CreatedAt)
+            .ToList();
+        if (submissions.Count == 0) return 0;
 
+        var submissionIds = submissions.Select(s => s.Id).ToHashSet();
+        var activeJobs = (await uow.LabGradingJobs.FindAsync(j =>
+            submissionIds.Contains(j.LabSubmissionId) &&
+            (j.Status == LabGradingJobStatus.Pending || j.Status == LabGradingJobStatus.Running)))
+            .ToList();
+        var pendingJobSubmissionIds = activeJobs
+            .Where(j => j.Status == LabGradingJobStatus.Pending)
+            .Select(j => j.LabSubmissionId)
+            .ToHashSet();
+
+        var queued = 0;
         foreach (var submission in submissions)
         {
-            var activeJobs = (await uow.LabGradingJobs.FindAsync(j =>
-                j.LabSubmissionId == submission.Id &&
-                (j.Status == LabGradingJobStatus.Pending || j.Status == LabGradingJobStatus.Running)))
-                .ToList();
-
-            foreach (var job in activeJobs)
-            {
-                job.Status = LabGradingJobStatus.Failed;
-                job.ErrorMessage = "Cancelled — regrade all requested.";
-                job.FinishedAt = DateTime.UtcNow;
-                uow.LabGradingJobs.Update(job);
-            }
+            if (pendingJobSubmissionIds.Contains(submission.Id)) continue;
 
             submission.Status = LabSubmissionStatus.Pending;
             submission.UpdatedAt = DateTime.UtcNow;
             uow.LabSubmissions.Update(submission);
 
             await uow.LabGradingJobs.AddAsync(new LabGradingJob { LabSubmissionId = submission.Id });
+            queued++;
         }
 
-        await uow.SaveChangesAsync(ct);
-        return submissions.Count;
+        if (queued > 0 || activeJobs.Count > 0)
+        {
+            assignment.Status = LabAssignmentStatus.Grading;
+            assignment.UpdatedAt = DateTime.UtcNow;
+            uow.LabAssignments.Update(assignment);
+            await uow.SaveChangesAsync(ct);
+        }
+
+        return queued;
     }
 
     public async Task DeleteAsync(Guid id, CancellationToken ct = default)

@@ -86,6 +86,7 @@ public class LabAssignmentsController(ILabAssignmentService service, ILabTestCas
     }
 
     [HttpPost("lab-assignments/{id:guid}/grade")]
+    [HttpPost("lab-assignments/{id:guid}/grade-all")]
     public async Task<IActionResult> TriggerGradingAsync(Guid id, CancellationToken ct)
     {
         var count = await service.TriggerGradingAsync(id, ct);

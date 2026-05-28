@@ -161,7 +161,10 @@ public class LabAssignmentService(IUnitOfWork uow) : ILabAssignmentService
         var assignment = await uow.LabAssignments.GetByIdAsync(id)
             ?? throw new NotFoundException($"LabAssignment '{id}' not found.");
 
-        var submissions = (await uow.LabSubmissions.FindAsync(s => s.LabAssignmentId == id)).ToList();
+        var submissions = (await uow.LabSubmissions.FindAsync(s => s.LabAssignmentId == id))
+            .OrderBy(s => s.StudentCode)
+            .ThenBy(s => s.CreatedAt)
+            .ToList();
         var totalTestCaseCount = (await uow.LabTestCases.FindAsync(t =>
             t.LabAssignmentId == id && t.Status == LabTestCaseStatus.Approved)).Count();
 
@@ -184,7 +187,7 @@ public class LabAssignmentService(IUnitOfWork uow) : ILabAssignmentService
                 g => g.Key,
                 g => g.OrderByDescending(j => j.CreatedAt).ThenByDescending(j => j.Id).First());
 
-        LabGradingJob? runningJob = latestJobBySubmission.Values
+        LabGradingJob? runningJob = jobs
             .Where(j => j.Status == LabGradingJobStatus.Running)
             .OrderBy(j => j.StartedAt ?? j.CreatedAt)
             .ThenBy(j => j.CreatedAt)
@@ -192,7 +195,7 @@ public class LabAssignmentService(IUnitOfWork uow) : ILabAssignmentService
 
         if (runningJob is null)
         {
-            runningJob = latestJobBySubmission.Values
+            runningJob = jobs
                 .Where(j => j.Status == LabGradingJobStatus.Pending)
                 .OrderBy(j => j.CreatedAt)
                 .FirstOrDefault();
@@ -200,7 +203,7 @@ public class LabAssignmentService(IUnitOfWork uow) : ILabAssignmentService
 
         var completedSubmissionCount = latestJobBySubmission.Values.Count(j =>
             j.Status == LabGradingJobStatus.Done || j.Status == LabGradingJobStatus.Failed);
-        var pendingSubmissionCount = latestJobBySubmission.Values.Count(j => j.Status == LabGradingJobStatus.Pending);
+        var pendingSubmissionCount = jobs.Count(j => j.Status == LabGradingJobStatus.Pending);
         var queuedSubmissionCount = pendingSubmissionCount -
             (runningJob is not null && runningJob.Status == LabGradingJobStatus.Pending ? 1 : 0);
 
@@ -244,7 +247,10 @@ public class LabAssignmentService(IUnitOfWork uow) : ILabAssignmentService
     {
         var assignment = await uow.LabAssignments.GetByIdAsync(id)
             ?? throw new NotFoundException($"LabAssignment '{id}' not found.");
-        var submissions = (await uow.LabSubmissions.FindAsync(s => s.LabAssignmentId == id)).ToList();
+        var submissions = (await uow.LabSubmissions.FindAsync(s => s.LabAssignmentId == id))
+            .OrderBy(s => s.StudentCode)
+            .ThenBy(s => s.CreatedAt)
+            .ToList();
         if (submissions.Count == 0) return 0;
 
         var submissionIds = submissions.Select(s => s.Id).ToHashSet();
@@ -258,9 +264,12 @@ public class LabAssignmentService(IUnitOfWork uow) : ILabAssignmentService
         {
             if (activeJobs.Contains(submission.Id)) continue;
             await uow.LabGradingJobs.AddAsync(new LabGradingJob { LabSubmissionId = submission.Id });
+            submission.Status = LabSubmissionStatus.Pending;
+            submission.UpdatedAt = DateTime.UtcNow;
+            uow.LabSubmissions.Update(submission);
             created++;
         }
-        if (created > 0)
+        if (created > 0 || activeJobs.Count > 0)
         {
             assignment.Status = LabAssignmentStatus.Grading;
             assignment.UpdatedAt = DateTime.UtcNow;

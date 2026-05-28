@@ -397,11 +397,14 @@ Không cần body. Xóa tất cả submission của assignment đó kèm file tr
 
 #### `POST /lab-submissions/{id}/regrade` — Chấm lại một bài
 
-Không cần body. Hủy các job đang `Pending`/`Running` của submission đó, tạo job mới.
+Không cần body. Tạo job mới ở cuối hàng đợi. Nếu submission đã có job `Pending` thì không tạo thêm job trùng; job `Running` hiện tại vẫn chạy xong trước.
 
 **Response `data`:**
 ```json
-{ "message": "Regrade job created. Worker will pick it up shortly." }
+{
+  "queued": true,
+  "message": "Regrade job queued. Worker will process it sequentially."
+}
 ```
 
 > Dùng khi một bài bị kẹt ở `Error` hoặc `BuildFailed` và muốn chấm lại.
@@ -410,7 +413,7 @@ Không cần body. Hủy các job đang `Pending`/`Running` của submission đ�
 
 #### `POST /lab-submissions/regrade-all?assignmentId={id}` — Chấm lại toàn bộ
 
-Không cần body. Hủy job cũ và tạo job mới cho **tất cả** bài nộp của lab đó.
+Không cần body. Tạo job mới cho các bài chưa có job `Pending`; job đang `Running` không bị hủy và toàn bộ hàng đợi được xử lý tuần tự.
 
 **Query param:** `assignmentId` (guid) — bắt buộc
 
@@ -440,7 +443,9 @@ Không cần body. Hủy job cũ và tạo job mới cho **tất cả** bài n�
 
 #### `POST /lab-assignments/{id}/grade`
 
-Không cần body. Tạo grading job cho tất cả submission đang `Pending` hoặc chưa có job active.
+Alias tương đương: `POST /lab-assignments/{id}/grade-all`.
+
+Không cần body. Tạo grading job cho tất cả submission chưa có job active. Worker xử lý tuần tự: một bài phải hoàn tất, lưu kết quả, cleanup Docker xong rồi mới lấy bài kế tiếp.
 
 **Response `data`:**
 ```json

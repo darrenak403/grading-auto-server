@@ -42,8 +42,14 @@ public class LabSubmissionsController(
     [HttpPost("lab-submissions/{id:guid}/regrade")]
     public async Task<IActionResult> RegradeAsync(Guid id, CancellationToken ct)
     {
-        await submissionService.RegradeAsync(id, ct);
-        return Ok(new { Message = "Regrade job created. Worker will pick it up shortly." });
+        var queued = await submissionService.RegradeAsync(id, ct);
+        return Ok(new
+        {
+            Queued = queued,
+            Message = queued
+                ? "Regrade job queued. Worker will process it sequentially."
+                : "Submission already has a pending regrade job."
+        });
     }
 
     [HttpPost("lab-submissions/regrade-all")]
