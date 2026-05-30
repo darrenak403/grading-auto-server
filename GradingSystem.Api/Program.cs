@@ -9,7 +9,7 @@ using Microsoft.OpenApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.WebHost.ConfigureKestrel(k => k.Limits.MaxRequestBodySize = 200 * 1024 * 1024); // 200 MB
+builder.WebHost.ConfigureKestrel(k => k.Limits.MaxRequestBodySize = 500L * 1024 * 1024); // 500 MB
 
 if (builder.Environment.IsProduction())
 {
@@ -27,6 +27,13 @@ else if (string.IsNullOrWhiteSpace(builder.Configuration["Storage:BasePath"]))
 {
     var solutionRoot = Path.GetFullPath(Path.Combine(builder.Environment.ContentRootPath, ".."));
     builder.Configuration["Storage:BasePath"] = Path.Combine(solutionRoot, "storage");
+}
+
+var storageBasePath = builder.Configuration["Storage:BasePath"];
+if (!string.IsNullOrWhiteSpace(storageBasePath) && !Path.IsPathRooted(storageBasePath))
+{
+    builder.Configuration["Storage:BasePath"] = Path.GetFullPath(
+        Path.Combine(builder.Environment.ContentRootPath, storageBasePath));
 }
 
 builder.Services.AddInfrastructure(builder.Configuration);

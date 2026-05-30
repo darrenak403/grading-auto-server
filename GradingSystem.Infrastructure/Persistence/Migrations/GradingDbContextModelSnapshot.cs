@@ -122,6 +122,9 @@ namespace GradingSystem.Infrastructure.Persistence.Migrations
                     b.Property<string>("GradingRound")
                         .HasColumnType("text");
 
+                    b.Property<Guid?>("LabAssignmentId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasColumnType("text");
@@ -134,6 +137,8 @@ namespace GradingSystem.Infrastructure.Persistence.Migrations
                     b.HasIndex("AssignmentId");
 
                     b.HasIndex("ExamSessionId");
+
+                    b.HasIndex("LabAssignmentId");
 
                     b.ToTable("ExportJobs");
                 });
@@ -722,9 +727,15 @@ namespace GradingSystem.Infrastructure.Persistence.Migrations
                         .WithMany()
                         .HasForeignKey("ExamSessionId");
 
+                    b.HasOne("GradingSystem.Domain.Entities.LabAssignment", "LabAssignment")
+                        .WithMany()
+                        .HasForeignKey("LabAssignmentId");
+
                     b.Navigation("Assignment");
 
                     b.Navigation("ExamSession");
+
+                    b.Navigation("LabAssignment");
                 });
 
             modelBuilder.Entity("GradingSystem.Domain.Entities.GradingJob", b =>

@@ -95,12 +95,13 @@ public class GradingDbContext(DbContextOptions<GradingDbContext> options) : DbCo
             e.Property(x => x.AdjustedScore).HasPrecision(10, 2);
         });
 
-        // ExportJob — AssignmentId and ExamSessionId are mutually exclusive (one is set)
+        // ExportJob — exactly one of AssignmentId, ExamSessionId, LabAssignmentId is set
         b.Entity<ExportJob>(e =>
         {
             e.Property(x => x.Status).HasConversion<string>();
             e.HasOne(x => x.Assignment).WithMany().HasForeignKey(x => x.AssignmentId).IsRequired(false);
             e.HasOne(x => x.ExamSession).WithMany().HasForeignKey(x => x.ExamSessionId).IsRequired(false);
+            e.HasOne(x => x.LabAssignment).WithMany().HasForeignKey(x => x.LabAssignmentId).IsRequired(false);
         });
 
         // ReviewNote: one-to-one with Submission

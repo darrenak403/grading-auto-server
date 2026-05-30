@@ -19,7 +19,9 @@ public partial class DockerComposeRunner(
     IOptions<WorkerOptions> opts,
     ILogger<DockerComposeRunner> logger)
 {
+    private static readonly SemaphoreSlim _pruneLock = new(1, 1);
     private static readonly string WorkRoot = Path.Combine(Path.GetTempPath(), "lab-grading");
+    private static readonly string DockerFallbackWorkingDirectory = Path.GetTempPath();
     private const int MaxDockerOutputChars = 12_000;
     private readonly ConcurrentDictionary<Guid, string> _composeDirs = new();
 
@@ -53,7 +55,7 @@ public partial class DockerComposeRunner(
         var apiPort = PickPort(opts.Value.LabApiPortRangeStart, opts.Value.LabApiPortRangeEnd);
 
         _composeDirs[jobId] = composeDir;
-        await CleanupDockerResourcesAsync(jobId, composeDir, removeWorkDir: false);
+        await CleanupDockerResourcesAsync(jobId, composeDir, removeWorkDir: false, ct);
 
         StripHostPortsAndContainerNames(composeDir);
         WriteOverride(composeDir, apiPort, serviceName, containerPort,
@@ -76,12 +78,14 @@ public partial class DockerComposeRunner(
 
     public string GetApiBaseUrl(int port) => $"http://{opts.Value.LabApiHost}:{port}";
 
-    public async Task StopAsync(Guid jobId)
+    public async Task StopAsync(Guid jobId, CancellationToken ct = default)
     {
         _composeDirs.TryRemove(jobId, out var composeDir);
-        var downDir = !string.IsNullOrEmpty(composeDir) && Directory.Exists(composeDir) ? composeDir : "/tmp";
+        var downDir = !string.IsNullOrEmpty(composeDir) && Directory.Exists(composeDir)
+            ? composeDir
+            : DockerFallbackWorkingDirectory;
 
-        await CleanupDockerResourcesAsync(jobId, downDir, removeWorkDir: true);
+        await CleanupDockerResourcesAsync(jobId, downDir, removeWorkDir: true, ct);
 
         logger.LogInformation("Docker compose down complete for job {JobId}", jobId);
     }
@@ -89,7 +93,9 @@ public partial class DockerComposeRunner(
     public async Task<string> GetLogsAsync(Guid jobId)
     {
         _composeDirs.TryGetValue(jobId, out var composeDir);
-        var logsDir = !string.IsNullOrEmpty(composeDir) && Directory.Exists(composeDir) ? composeDir : "/tmp";
+        var logsDir = !string.IsNullOrEmpty(composeDir) && Directory.Exists(composeDir)
+            ? composeDir
+            : DockerFallbackWorkingDirectory;
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var result = await RunDockerAsync(logsDir, cts.Token,
@@ -300,7 +306,11 @@ public partial class DockerComposeRunner(
                 $"docker compose {string.Join(' ', args)} failed (exit {result.ExitCode}): {result.Output}");
     }
 
-    private async Task CleanupDockerResourcesAsync(Guid jobId, string workingDirectory, bool removeWorkDir)
+    private async Task CleanupDockerResourcesAsync(
+        Guid jobId,
+        string workingDirectory,
+        bool removeWorkDir,
+        CancellationToken ct = default)
     {
         var timeout = TimeSpan.FromSeconds(opts.Value.LabDockerDownTimeoutSeconds);
         var project = $"lab-{jobId}";
@@ -315,6 +325,19 @@ public partial class DockerComposeRunner(
         await RemoveResourcesByLabelAsync(jobId, "volume", "volume", ["ls", "-q", "--filter", $"label=com.docker.compose.project={project}"], ["volume", "rm", "-f"]);
         await RemoveResourcesByLabelAsync(jobId, "network", "network", ["ls", "-q", "--filter", $"label=com.docker.compose.project={project}"], ["network", "rm"]);
         await RemoveResourcesByLabelAsync(jobId, "image", "image", ["ls", "-q", "--filter", $"label=com.docker.compose.project={project}"], ["image", "rm", "-f"]);
+
+        if (removeWorkDir)
+        {
+            await _pruneLock.WaitAsync(ct);
+            try
+            {
+                await PruneBuildCacheAsync(jobId);
+            }
+            finally
+            {
+                _pruneLock.Release();
+            }
+        }
 
         if (!removeWorkDir) return;
 
@@ -337,7 +360,7 @@ public partial class DockerComposeRunner(
         string[] listArgs,
         string[] removeArgs)
     {
-        var listResult = await RunCleanupCommandAsync(jobId, "/tmp", TimeSpan.FromSeconds(15),
+        var listResult = await RunCleanupCommandAsync(jobId, DockerFallbackWorkingDirectory, TimeSpan.FromSeconds(15),
             [listCommand, .. listArgs]);
         if (listResult.ExitCode != 0) return;
 
@@ -349,10 +372,30 @@ public partial class DockerComposeRunner(
         if (ids.Length == 0) return;
 
         var args = removeArgs.Concat(ids).ToArray();
-        var removeResult = await RunCleanupCommandAsync(jobId, "/tmp", TimeSpan.FromSeconds(30), args);
+        var removeResult = await RunCleanupCommandAsync(jobId, DockerFallbackWorkingDirectory, TimeSpan.FromSeconds(30), args);
         if (removeResult.ExitCode == 0)
             logger.LogInformation("Removed {Count} Docker {ResourceName}(s) for job {JobId}",
                 ids.Length, resourceName, jobId);
+    }
+
+    private async Task PruneBuildCacheAsync(Guid jobId)
+    {
+        var timeout = TimeSpan.FromMinutes(2);
+        var pruneResult = await RunCleanupCommandAsync(
+            jobId, DockerFallbackWorkingDirectory, timeout, "buildx", "prune", "-a", "-f");
+        if (pruneResult.ExitCode != 0)
+        {
+            pruneResult = await RunCleanupCommandAsync(
+                jobId, DockerFallbackWorkingDirectory, timeout, "builder", "prune", "-a", "-f");
+        }
+
+        if (pruneResult.ExitCode == 0)
+        {
+            logger.LogInformation(
+                "Docker build cache pruned for job {JobId}: {Output}",
+                jobId,
+                string.IsNullOrWhiteSpace(pruneResult.Output) ? "(no output)" : pruneResult.Output.Trim());
+        }
     }
 
     private async Task<DockerCommandResult> RunCleanupCommandAsync(
@@ -394,7 +437,9 @@ public partial class DockerComposeRunner(
     {
         var psi = new ProcessStartInfo("docker")
         {
-            WorkingDirectory = Directory.Exists(workingDirectory) ? workingDirectory : "/tmp",
+            WorkingDirectory = Directory.Exists(workingDirectory)
+                ? workingDirectory
+                : DockerFallbackWorkingDirectory,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
         };

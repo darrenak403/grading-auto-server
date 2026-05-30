@@ -7,6 +7,9 @@ using GradingSystem.Worker.Services;
 using GradingSystem.Worker.Services.Lab;
 using GradingSystem.Worker.Workers;
 using MassTransit;
+using OfficeOpenXml;
+
+ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
 
 var builder = Host.CreateApplicationBuilder(args);
 
@@ -22,6 +25,13 @@ else if (string.IsNullOrWhiteSpace(builder.Configuration["Storage:BasePath"]))
 {
     var solutionRoot = Path.GetFullPath(Path.Combine(builder.Environment.ContentRootPath, ".."));
     builder.Configuration["Storage:BasePath"] = Path.Combine(solutionRoot, "storage");
+}
+
+var storageBasePath = builder.Configuration["Storage:BasePath"];
+if (!string.IsNullOrWhiteSpace(storageBasePath) && !Path.IsPathRooted(storageBasePath))
+{
+    builder.Configuration["Storage:BasePath"] = Path.GetFullPath(
+        Path.Combine(builder.Environment.ContentRootPath, storageBasePath));
 }
 
 builder.Services.AddInfrastructure(builder.Configuration);

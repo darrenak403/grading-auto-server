@@ -1,6 +1,7 @@
 using GradingSystem.Application.DTOs;
 using GradingSystem.Application.Interfaces;
 using Microsoft.AspNetCore.Mvc;
+using SharpCompress.Archives;
 
 namespace GradingSystem.Api.Controllers;
 
@@ -23,6 +24,35 @@ public class LabSubmissionsController(
         var uploads = files.Select(f => new LabUploadFile(f.FileName, f.OpenReadStream()));
         var result = await submissionService.BatchUploadAsync(assignmentId, uploads, ct);
         return Ok(result, $"{result.Created.Count} submission(s) uploaded.");
+    }
+
+    [HttpPost("lab-assignments/{assignmentId:guid}/bulk-upload")]
+    [Consumes("multipart/form-data")]
+    [RequestSizeLimit(500L * 1024 * 1024)]
+    [RequestFormLimits(MultipartBodyLengthLimit = 500L * 1024 * 1024)]
+    public async Task<IActionResult> BulkUploadZipAsync(Guid assignmentId, IFormFile file, CancellationToken ct)
+    {
+        if (file is null || file.Length == 0)
+            return BadRequest("Master zip/rar file is required.");
+
+        var uploads = new List<LabUploadFile>();
+        using var archive = ArchiveFactory.OpenArchive(file.OpenReadStream());
+        
+        foreach (var entry in archive.Entries.Where(e => !e.IsDirectory && e.Key != null && (e.Key.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) || e.Key.EndsWith(".rar", StringComparison.OrdinalIgnoreCase))))
+        {
+            var ms = new MemoryStream();
+            using (var entryStream = entry.OpenEntryStream())
+            {
+                await entryStream.CopyToAsync(ms, ct);
+            }
+            ms.Position = 0;
+            // The file name might contain paths if it's nested; take just the name
+            var safeName = Path.GetFileName(entry.Key) ?? "unknown.zip";
+            uploads.Add(new LabUploadFile(safeName, ms));
+        }
+
+        var result = await submissionService.BatchUploadAsync(assignmentId, uploads, ct);
+        return Ok(result, $"Bulk upload complete: {result.Created.Count} submission(s) extracted and uploaded.");
     }
 
     [HttpGet("lab-submissions/{id:guid}")]

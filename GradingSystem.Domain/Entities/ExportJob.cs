@@ -12,6 +12,10 @@ public class ExportJob : BaseEntity
     public Guid? ExamSessionId { get; set; }
     public ExamSession? ExamSession { get; set; }
 
+    /// <summary>Set for lab assignment exports.</summary>
+    public Guid? LabAssignmentId { get; set; }
+    public LabAssignment? LabAssignment { get; set; }
+
     /// <summary>Optional round filter; null = latest round per submission.</summary>
     public string? GradingRound { get; set; }
     public ExportStatus Status { get; set; } = ExportStatus.Pending;

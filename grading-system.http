@@ -420,3 +420,11 @@ GET {{api}}/exports/{{exportJobId}}
 
 ### 8.4 Tải file (poll đến khi status = Done)
 GET {{api}}/exports/{{exportJobId}}/download
+
+###
+
+### 8.5 Export lab assignment  →  lưu exportJobId
+POST {{api}}/lab-assignments/8014964c-fd2b-4569-9104-fb249b2ee46d/exports
+Content-Type: application/json
+
+{}

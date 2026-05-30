@@ -4,7 +4,10 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace GradingSystem.Api.Controllers;
 
-public class LabAssignmentsController(ILabAssignmentService service, ILabTestCaseService testCaseService) : BaseApiController
+public class LabAssignmentsController(
+    ILabAssignmentService service,
+    ILabTestCaseService testCaseService,
+    IExportService exportService) : BaseApiController
 {
     [HttpGet("lab-assignments")]
     public async Task<IActionResult> ListAsync(CancellationToken ct)
@@ -83,6 +86,13 @@ public class LabAssignmentsController(ILabAssignmentService service, ILabTestCas
     {
         var count = await testCaseService.DeleteAllByAssignmentAsync(id, ct);
         return Ok(new { Deleted = count }, $"{count} test case(s) deleted.");
+    }
+
+    [HttpPost("lab-assignments/{id:guid}/exports")]
+    public async Task<IActionResult> CreateExportAsync(Guid id, CancellationToken ct)
+    {
+        var job = await exportService.CreateLabExportAsync(id, ct);
+        return Ok(job, "Lab export job created.");
     }
 
     [HttpPost("lab-assignments/{id:guid}/grade")]
