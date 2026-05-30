@@ -103,8 +103,8 @@ public class AssignmentsController(IAssignmentService assignmentService, IBulkUp
 
     [HttpPost("assignments/{id:guid}/bulk-upload")]
     [Consumes("multipart/form-data")]
-    [RequestSizeLimit(200 * 1024 * 1024)]
-    [RequestFormLimits(MultipartBodyLengthLimit = 200 * 1024 * 1024)]
+    [RequestSizeLimit(UploadLimits.MaxBulkUploadBytes)]
+    [RequestFormLimits(MultipartBodyLengthLimit = UploadLimits.MaxBulkUploadBytes)]
     public async Task<IActionResult> BulkUploadAsync(
         Guid id,
         IFormFile file,

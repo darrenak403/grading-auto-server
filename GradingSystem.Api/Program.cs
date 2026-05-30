@@ -1,5 +1,6 @@
 using System.Reflection;
 using Asp.Versioning;
+using GradingSystem.Api;
 using GradingSystem.Api.Middleware;
 using GradingSystem.Infrastructure.Extensions;
 using GradingSystem.Infrastructure.Persistence;
@@ -9,7 +10,7 @@ using Microsoft.OpenApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.WebHost.ConfigureKestrel(k => k.Limits.MaxRequestBodySize = 500L * 1024 * 1024); // 500 MB
+builder.WebHost.ConfigureKestrel(k => k.Limits.MaxRequestBodySize = UploadLimits.MaxBulkUploadBytes);
 
 if (builder.Environment.IsProduction())
 {

@@ -28,8 +28,8 @@ public class LabSubmissionsController(
 
     [HttpPost("lab-assignments/{assignmentId:guid}/bulk-upload")]
     [Consumes("multipart/form-data")]
-    [RequestSizeLimit(500L * 1024 * 1024)]
-    [RequestFormLimits(MultipartBodyLengthLimit = 500L * 1024 * 1024)]
+    [RequestSizeLimit(UploadLimits.MaxBulkUploadBytes)]
+    [RequestFormLimits(MultipartBodyLengthLimit = UploadLimits.MaxBulkUploadBytes)]
     public async Task<IActionResult> BulkUploadZipAsync(Guid assignmentId, IFormFile file, CancellationToken ct)
     {
         if (file is null || file.Length == 0)
