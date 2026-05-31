@@ -1,3 +1,4 @@
+using System.Drawing;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using GradingSystem.Application.Common;
@@ -208,7 +209,7 @@ public partial class ExportRunner(
                 }
 
                 var score = result.ManualOverrideScore ?? result.AwardedScore;
-                row.Add(score);
+                row.Add(FormatLabTestCaseCell(score, result));
                 grandTotal += score;
             }
 
@@ -217,10 +218,25 @@ public partial class ExportRunner(
             rows.Add(row);
         }
 
-        WriteSheet(pkg, UniqueSheetName(pkg, assignment.Title), columns, rows);
+        var sheetName = UniqueSheetName(pkg, assignment.Title);
+        var ws = WriteSheet(pkg, sheetName, columns, rows);
+
+        for (var c = 3; c < 3 + testCases.Count; c++)
+        {
+            ws.Column(c).Width = 35;
+            ws.Column(c).Style.WrapText = true;
+        }
+
+        if (rows.Count > 0 && testCases.Count > 0)
+        {
+            ws.Cells[2, 3, rows.Count + 1, 2 + testCases.Count].Style.VerticalAlignment =
+                OfficeOpenXml.Style.ExcelVerticalAlignment.Top;
+        }
+
+        ApplyLabTestCaseScoreStyles(ws, submissions, testCases, latestJobBySubmission, resultsByJobAndTestCase);
     }
 
-    private static void WriteSheet(
+    private static ExcelWorksheet WriteSheet(
         ExcelPackage pkg, string sheetName, IReadOnlyList<string> columns, IReadOnlyList<List<object>> rows)
     {
         var ws = pkg.Workbook.Worksheets.Add(sheetName);
@@ -233,6 +249,7 @@ public partial class ExportRunner(
                 ws.Cells[r + 2, c + 1].Value = rows[r][c];
 
         ws.Cells.AutoFitColumns();
+        return ws;
     }
 
     private static string LabTestCaseLabel(LabTestCase tc)
@@ -242,6 +259,85 @@ public partial class ExportRunner(
         if (tc.HttpMethod.Equals("SOURCE", StringComparison.OrdinalIgnoreCase))
             return "SOURCE";
         return $"{tc.HttpMethod} {tc.UrlTemplate}";
+    }
+
+    private static string FormatLabTestCaseCell(decimal score, LabTestCaseResult result)
+    {
+        var message = ExtractLabResultMessage(result);
+        return string.IsNullOrWhiteSpace(message)
+            ? score.ToString()
+            : $"{score}{Environment.NewLine}{message}";
+    }
+
+    private static string ExtractLabResultMessage(LabTestCaseResult result)
+    {
+        if (!string.IsNullOrWhiteSpace(result.ErrorMessage))
+            return NormalizeExcelText(result.ErrorMessage);
+
+        if (string.IsNullOrWhiteSpace(result.ActualResponse))
+            return string.Empty;
+
+        try
+        {
+            using var json = JsonDocument.Parse(result.ActualResponse);
+            if (json.RootElement.ValueKind == JsonValueKind.Object &&
+                json.RootElement.TryGetProperty("message", out var messageProp) &&
+                messageProp.ValueKind == JsonValueKind.String)
+            {
+                return NormalizeExcelText(messageProp.GetString());
+            }
+        }
+        catch (JsonException)
+        {
+        }
+
+        return NormalizeExcelText(result.ActualResponse);
+    }
+
+    private static string NormalizeExcelText(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return string.Empty;
+
+        var normalized = Regex.Replace(value.Trim(), @"\s+", " ");
+        return normalized.Length <= 160 ? normalized : normalized[..157] + "...";
+    }
+
+    private static void ApplyLabTestCaseScoreStyles(
+        ExcelWorksheet ws,
+        IReadOnlyList<LabSubmission> submissions,
+        IReadOnlyList<LabTestCase> testCases,
+        IReadOnlyDictionary<Guid, LabGradingJob> latestJobBySubmission,
+        IReadOnlyDictionary<(Guid LabGradingJobId, Guid LabTestCaseId), LabTestCaseResult> resultsByJobAndTestCase)
+    {
+        for (var rowIndex = 0; rowIndex < submissions.Count; rowIndex++)
+        {
+            var submission = submissions[rowIndex];
+            if (!latestJobBySubmission.TryGetValue(submission.Id, out var latestJob))
+                continue;
+
+            for (var testCaseIndex = 0; testCaseIndex < testCases.Count; testCaseIndex++)
+            {
+                var testCase = testCases[testCaseIndex];
+                if (!resultsByJobAndTestCase.TryGetValue((latestJob.Id, testCase.Id), out var result))
+                    continue;
+
+                var score = result.ManualOverrideScore ?? result.AwardedScore;
+                var cell = ws.Cells[rowIndex + 2, testCaseIndex + 3];
+                cell.Style.Fill.PatternType = OfficeOpenXml.Style.ExcelFillStyle.Solid;
+
+                if (score >= testCase.Score)
+                {
+                    cell.Style.Fill.BackgroundColor.SetColor(Color.FromArgb(226, 239, 218));
+                    cell.Style.Font.Color.SetColor(Color.FromArgb(0, 97, 0));
+                }
+                else
+                {
+                    cell.Style.Fill.BackgroundColor.SetColor(Color.FromArgb(255, 199, 206));
+                    cell.Style.Font.Color.SetColor(Color.FromArgb(156, 0, 6));
+                }
+            }
+        }
     }
 
     [GeneratedRegex(@"[:\\/?*\[\]]")]
