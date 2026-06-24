@@ -14,6 +14,8 @@ public class LabTestCase : BaseEntity
     public string HttpMethod { get; set; } = null!;
     public string UrlTemplate { get; set; } = null!;
     public string? Description { get; set; }
+    public string? SaveTokenFrom { get; set; }
+    public string? HeadersJson { get; set; }
     public string? InputJson { get; set; }
     public string? ExpectJson { get; set; }
     public int ExpectedStatusCode { get; set; } = 200;

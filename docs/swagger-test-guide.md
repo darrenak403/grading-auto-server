@@ -66,29 +66,61 @@ Paste mảng JSON test case vào body. Ví dụ tối thiểu:
     "order": 2
   },
   {
-    "httpMethod": "GET",
-    "urlTemplate": "/api/products",
-    "description": "Lấy danh sách sản phẩm — trả về 200",
-    "inputJson": null,
-    "expectJson": "{\"success\":true}",
+    "httpMethod": "POST",
+    "urlTemplate": "/api/auth/login",
+    "description": "Đăng nhập admin để lấy JWT",
+    "saveTokenFrom": "$.data.accessToken;$.data.refreshToken",
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "inputJson": {
+      "username": "admin",
+      "password": "123456"
+    },
+    "expectJson": {
+      "success": true
+    },
     "expectedStatusCode": 200,
     "matchMode": "Subset",
     "score": 1.0,
     "order": 3
   },
   {
+    "httpMethod": "GET",
+    "urlTemplate": "/api/products",
+    "description": "Lấy danh sách sản phẩm — trả về 200",
+    "headers": {
+      "Authorization": "Bearer {{token}}"
+    },
+    "inputJson": null,
+    "expectJson": "{\"success\":true}",
+    "expectedStatusCode": 200,
+    "matchMode": "Subset",
+    "score": 1.0,
+    "order": 4
+  },
+  {
     "httpMethod": "POST",
     "urlTemplate": "/api/products",
     "description": "Tạo sản phẩm mới",
+    "headers": {
+      "Authorization": "Bearer {{token}}"
+    },
     "inputJson": "{\"name\":\"Test Product\",\"price\":100}",
     "expectJson": "{\"success\":true}",
     "expectedStatusCode": 201,
     "matchMode": "Subset",
     "score": 1.0,
-    "order": 4
+    "order": 5
   }
 ]
 ```
+
+**Lưu ý về JWT / biến runtime:**
+
+- `saveTokenFrom: "$.data.accessToken;$.data.refreshToken"` sẽ lưu `accessToken`, alias `token`, và `refreshToken`
+- Test case sau dùng `{{accessToken}}`, `{{token}}`, hoặc `{{refreshToken}}` trong `headers`, `inputJson`, hoặc `urlTemplate`
+- Nếu endpoint không cần auth thì để `saveTokenFrom` và `headers` là `null`
 
 ✅ Response trả về danh sách test case mới tạo, tất cả `status = "Draft"`
 

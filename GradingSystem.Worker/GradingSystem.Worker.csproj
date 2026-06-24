@@ -4,6 +4,7 @@
     <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <ProduceReferenceAssembly>false</ProduceReferenceAssembly>
     <UserSecretsId>dotnet-GradingSystem.Worker-861c1a49-dac1-43c4-9046-87548637c895</UserSecretsId>
   </PropertyGroup>
 

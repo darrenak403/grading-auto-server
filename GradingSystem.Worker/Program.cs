@@ -89,6 +89,7 @@ builder.Services.AddMassTransit(x =>
 builder.Services.AddHostedService<GradingWorker>();
 builder.Services.AddHostedService<LabGradingWorker>();
 builder.Services.AddHostedService<StorageCleanupWorker>();
+builder.Services.AddHostedService<DockerBuildCacheCleanupWorker>();
 
 var host = builder.Build();
 

@@ -301,6 +301,8 @@ public class LabAssignmentService(IUnitOfWork uow) : ILabAssignmentService
         HttpMethod = t.HttpMethod,
         UrlTemplate = t.UrlTemplate,
         Description = t.Description,
+        SaveTokenFrom = t.SaveTokenFrom,
+        Headers = t.HeadersJson,
         InputJson = t.InputJson,
         ExpectJson = t.ExpectJson,
         ExpectedStatusCode = t.ExpectedStatusCode,

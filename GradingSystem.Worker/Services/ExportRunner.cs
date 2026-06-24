@@ -209,7 +209,7 @@ public partial class ExportRunner(
                 }
 
                 var score = result.ManualOverrideScore ?? result.AwardedScore;
-                row.Add(FormatLabTestCaseCell(score, result));
+                row.Add(FormatLabTestCaseCell(score, tc, result));
                 grandTotal += score;
             }
 
@@ -261,37 +261,21 @@ public partial class ExportRunner(
         return $"{tc.HttpMethod} {tc.UrlTemplate}";
     }
 
-    private static string FormatLabTestCaseCell(decimal score, LabTestCaseResult result)
+    private static string FormatLabTestCaseCell(decimal score, LabTestCase tc, LabTestCaseResult result)
     {
-        var message = ExtractLabResultMessage(result);
-        return string.IsNullOrWhiteSpace(message)
-            ? score.ToString()
-            : $"{score}{Environment.NewLine}{message}";
-    }
+        var lines = new List<string> { $"Điểm: {score}" };
 
-    private static string ExtractLabResultMessage(LabTestCaseResult result)
-    {
+        lines.Add(tc.HttpMethod.Equals("SOURCE", StringComparison.OrdinalIgnoreCase)
+            ? $"Rule: {tc.UrlTemplate}"
+            : $"Endpoint: {tc.HttpMethod} {tc.UrlTemplate}");
+
+        if (result.ActualStatusCode.HasValue)
+            lines.Add($"Status: {result.ActualStatusCode}");
+
         if (!string.IsNullOrWhiteSpace(result.ErrorMessage))
-            return NormalizeExcelText(result.ErrorMessage);
+            lines.Add($"Lỗi: {NormalizeExcelText(result.ErrorMessage)}");
 
-        if (string.IsNullOrWhiteSpace(result.ActualResponse))
-            return string.Empty;
-
-        try
-        {
-            using var json = JsonDocument.Parse(result.ActualResponse);
-            if (json.RootElement.ValueKind == JsonValueKind.Object &&
-                json.RootElement.TryGetProperty("message", out var messageProp) &&
-                messageProp.ValueKind == JsonValueKind.String)
-            {
-                return NormalizeExcelText(messageProp.GetString());
-            }
-        }
-        catch (JsonException)
-        {
-        }
-
-        return NormalizeExcelText(result.ActualResponse);
+        return string.Join(Environment.NewLine, lines);
     }
 
     private static string NormalizeExcelText(string? value)
@@ -300,7 +284,13 @@ public partial class ExportRunner(
             return string.Empty;
 
         var normalized = Regex.Replace(value.Trim(), @"\s+", " ");
-        return normalized.Length <= 160 ? normalized : normalized[..157] + "...";
+        return TruncateExcelText(normalized);
+    }
+
+    private static string TruncateExcelText(string value)
+    {
+        const int maxLength = 2000;
+        return value.Length <= maxLength ? value : value[..(maxLength - 3)] + "...";
     }
 
     private static void ApplyLabTestCaseScoreStyles(

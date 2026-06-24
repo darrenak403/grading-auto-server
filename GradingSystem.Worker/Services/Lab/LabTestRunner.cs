@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using GradingSystem.Domain.Entities;
 
 namespace GradingSystem.Worker.Services.Lab;
@@ -7,17 +8,19 @@ namespace GradingSystem.Worker.Services.Lab;
 public class LabTestRunner(IHttpClientFactory httpClientFactory, ILogger<LabTestRunner> logger)
 {
     private static readonly JsonSerializerOptions _jsonOpts = new(JsonSerializerDefaults.Web);
+    private static readonly Regex _variablePattern = new(@"\{\{(?<name>[^{}]+)\}\}", RegexOptions.Compiled);
 
     public async Task<List<LabTestCaseResult>> RunAsync(
         string baseUrl, Guid jobId, IEnumerable<LabTestCase> testCases, CancellationToken ct)
     {
         var results = new List<LabTestCaseResult>();
+        var variables = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         using var client = httpClientFactory.CreateClient();
         client.Timeout = TimeSpan.FromSeconds(10);
 
         foreach (var tc in testCases.OrderBy(t => t.Order).ThenBy(t => t.CreatedAt))
         {
-            var result = await RunSingleAsync(tc, baseUrl, jobId, client, ct);
+            var result = await RunSingleAsync(tc, baseUrl, jobId, client, variables, ct);
             results.Add(result);
             logger.LogInformation(
                 "Job {JobId} tc {TcId} ({Method} {Url}): passed={Passed} status={Status}",
@@ -28,23 +31,51 @@ public class LabTestRunner(IHttpClientFactory httpClientFactory, ILogger<LabTest
     }
 
     private async Task<LabTestCaseResult> RunSingleAsync(
-        LabTestCase tc, string baseUrl, Guid jobId, HttpClient client, CancellationToken ct)
+        LabTestCase tc,
+        string baseUrl,
+        Guid jobId,
+        HttpClient client,
+        Dictionary<string, string> variables,
+        CancellationToken ct)
     {
-        var url = baseUrl.TrimEnd('/') + tc.UrlTemplate;
+        var resolvedUrlTemplate = ResolveTemplate(tc.UrlTemplate, variables);
+        var resolvedInputJson = ResolveTemplate(tc.InputJson, variables);
+        var resolvedHeadersJson = ResolveTemplate(tc.HeadersJson, variables);
+        var url = baseUrl.TrimEnd('/') + resolvedUrlTemplate;
         var method = new HttpMethod(tc.HttpMethod.ToUpperInvariant());
-        var request = new HttpRequestMessage(method, url);
+        var requiresAuthorization = HasAuthorizationHeader(resolvedHeadersJson);
 
-        if (tc.InputJson != null)
+        if (requiresAuthorization)
         {
-            if (method == HttpMethod.Get || method == HttpMethod.Delete)
-                request.RequestUri = new Uri(url + (url.Contains('?') ? "&" : "?") + JsonToQueryString(tc.InputJson));
-            else
-                request.Content = new StringContent(tc.InputJson, Encoding.UTF8, "application/json");
+            using var anonymousRequest = BuildRequest(method, url, resolvedInputJson, resolvedHeadersJson, includeAuthorization: false);
+
+            try
+            {
+                var anonymousResponse = await client.SendAsync(anonymousRequest, ct);
+                var anonymousStatus = (int)anonymousResponse.StatusCode;
+
+                if (anonymousStatus is not 401 and not 403)
+                {
+                    var anonymousBody = await anonymousResponse.Content.ReadAsStringAsync(ct);
+                    return new LabTestCaseResult
+                    {
+                        LabGradingJobId = jobId,
+                        LabTestCaseId = tc.Id,
+                        Passed = false,
+                        AwardedScore = 0,
+                        ActualStatusCode = anonymousStatus,
+                        ActualResponse = TrimResponse(anonymousBody),
+                        ErrorMessage = $"Expected protected endpoint to reject anonymous request with 401 or 403, got {anonymousStatus}.",
+                    };
+                }
+            }
+            catch (Exception ex)
+            {
+                return Fail(tc, jobId, url, $"Anonymous auth check HTTP error: {ex.Message}");
+            }
         }
-        else if (method == HttpMethod.Post || method == HttpMethod.Put || method == HttpMethod.Patch)
-        {
-            request.Content = new StringContent("{}", Encoding.UTF8, "application/json");
-        }
+
+        using var request = BuildRequest(method, url, resolvedInputJson, resolvedHeadersJson, includeAuthorization: true);
 
         HttpResponseMessage? response = null;
         string actualBody = string.Empty;
@@ -69,6 +100,9 @@ public class LabTestRunner(IHttpClientFactory httpClientFactory, ILogger<LabTest
         bool passed = statusPassed && bodyPassed;
         string? errorMessage = passed ? null : BuildErrorMessage(tc, actualStatus, statusPassed, bodyPassed);
 
+        if (passed)
+            TryCaptureVariable(tc.SaveTokenFrom, actualBody, variables);
+
         return new LabTestCaseResult
         {
             LabGradingJobId = jobId,
@@ -76,9 +110,34 @@ public class LabTestRunner(IHttpClientFactory httpClientFactory, ILogger<LabTest
             Passed          = passed,
             AwardedScore    = passed ? tc.Score : 0,
             ActualStatusCode = actualStatus,
-            ActualResponse  = actualBody.Length > 1000 ? actualBody[..1000] : actualBody,
+            ActualResponse  = TrimResponse(actualBody),
             ErrorMessage    = errorMessage,
         };
+    }
+
+    private static HttpRequestMessage BuildRequest(
+        HttpMethod method,
+        string url,
+        string? inputJson,
+        string? headersJson,
+        bool includeAuthorization)
+    {
+        var request = new HttpRequestMessage(method, url);
+
+        if (inputJson != null)
+        {
+            if (method == HttpMethod.Get || method == HttpMethod.Delete)
+                request.RequestUri = new Uri(url + (url.Contains('?') ? "&" : "?") + JsonToQueryString(inputJson));
+            else
+                request.Content = new StringContent(inputJson, Encoding.UTF8, "application/json");
+        }
+        else if (method == HttpMethod.Post || method == HttpMethod.Put || method == HttpMethod.Patch)
+        {
+            request.Content = new StringContent("{}", Encoding.UTF8, "application/json");
+        }
+
+        ApplyHeaders(request, headersJson, includeAuthorization);
+        return request;
     }
 
     private static bool CheckBody(LabTestCase tc, string actualBody)
@@ -127,6 +186,183 @@ public class LabTestRunner(IHttpClientFactory httpClientFactory, ILogger<LabTest
         return null;
     }
 
+    private static string? ResolveTemplate(string? template, IReadOnlyDictionary<string, string> variables)
+    {
+        if (string.IsNullOrEmpty(template) || variables.Count == 0) return template;
+
+        return _variablePattern.Replace(template, match =>
+        {
+            var name = match.Groups["name"].Value.Trim();
+            return variables.TryGetValue(name, out var value) ? value : match.Value;
+        });
+    }
+
+    private static bool HasAuthorizationHeader(string? headersJson)
+    {
+        if (string.IsNullOrWhiteSpace(headersJson)) return false;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(headersJson);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object) return false;
+
+            return doc.RootElement.EnumerateObject()
+                .Any(prop => IsAuthorizationHeader(prop.Name));
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static void ApplyHeaders(HttpRequestMessage request, string? headersJson, bool includeAuthorization)
+    {
+        if (string.IsNullOrWhiteSpace(headersJson)) return;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(headersJson);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object) return;
+
+            foreach (var prop in doc.RootElement.EnumerateObject())
+            {
+                if (!includeAuthorization && IsAuthorizationHeader(prop.Name)) continue;
+
+                var value = prop.Value.ValueKind == JsonValueKind.String
+                    ? prop.Value.GetString()
+                    : prop.Value.GetRawText();
+
+                if (string.IsNullOrWhiteSpace(value)) continue;
+
+                if (request.Headers.TryAddWithoutValidation(prop.Name, value)) continue;
+
+                request.Content ??= new StringContent(string.Empty);
+                request.Content.Headers.TryAddWithoutValidation(prop.Name, value);
+            }
+        }
+        catch
+        {
+            // Ignore malformed optional headers and keep executing the test case.
+        }
+    }
+
+    private static void TryCaptureVariable(
+        string? saveTokenFrom,
+        string actualBody,
+        IDictionary<string, string> variables)
+    {
+        if (string.IsNullOrWhiteSpace(saveTokenFrom) || string.IsNullOrWhiteSpace(actualBody)) return;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(actualBody);
+            foreach (var jsonPath in SplitCapturePaths(saveTokenFrom))
+            {
+                if (!TryResolveJsonPath(doc.RootElement, jsonPath, out var valueElement)) continue;
+
+                var variableName = InferVariableName(jsonPath);
+                var variableValue = valueElement.ValueKind == JsonValueKind.String
+                    ? valueElement.GetString()
+                    : valueElement.GetRawText();
+
+                if (string.IsNullOrWhiteSpace(variableName) || string.IsNullOrWhiteSpace(variableValue)) continue;
+                variables[variableName] = variableValue;
+                SaveVariableAliases(variableName, variableValue, variables);
+            }
+        }
+        catch
+        {
+            // Ignore extraction failures and continue grading the remaining test cases.
+        }
+    }
+
+    private static IEnumerable<string> SplitCapturePaths(string saveTokenFrom) =>
+        saveTokenFrom
+            .Split([';', '\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(path => !string.IsNullOrWhiteSpace(path));
+
+    private static void SaveVariableAliases(
+        string variableName,
+        string variableValue,
+        IDictionary<string, string> variables)
+    {
+        if (variableName.Equals("accessToken", StringComparison.OrdinalIgnoreCase))
+            variables["token"] = variableValue;
+
+        if (variableName.Equals("token", StringComparison.OrdinalIgnoreCase))
+            variables["accessToken"] = variableValue;
+    }
+
+    private static string InferVariableName(string jsonPath)
+    {
+        var path = jsonPath.Trim();
+        if (path.StartsWith("$.")) path = path[2..];
+        else if (path.StartsWith("$")) path = path[1..];
+
+        var name = path.Split('.', StringSplitOptions.RemoveEmptyEntries).LastOrDefault() ?? string.Empty;
+        var bracketIndex = name.IndexOf('[');
+        if (bracketIndex >= 0)
+            name = name[..bracketIndex];
+
+        return name.Trim();
+    }
+
+    private static bool TryResolveJsonPath(JsonElement root, string jsonPath, out JsonElement value)
+    {
+        value = root;
+        if (string.IsNullOrWhiteSpace(jsonPath)) return false;
+
+        var path = jsonPath.Trim();
+        if (path == "$") return true;
+        if (path.StartsWith("$.")) path = path[2..];
+        else if (path.StartsWith("$")) path = path[1..];
+
+        if (string.IsNullOrWhiteSpace(path)) return true;
+
+        foreach (var segment in path.Split('.', StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (!TryResolveSegment(value, segment, out value))
+                return false;
+        }
+
+        return true;
+    }
+
+    private static bool TryResolveSegment(JsonElement current, string segment, out JsonElement value)
+    {
+        value = current;
+        if (string.IsNullOrWhiteSpace(segment)) return false;
+
+        var remainder = segment;
+        var bracketIndex = remainder.IndexOf('[');
+        var propertyName = bracketIndex >= 0 ? remainder[..bracketIndex] : remainder;
+
+        if (!string.IsNullOrEmpty(propertyName))
+        {
+            if (current.ValueKind != JsonValueKind.Object || !current.TryGetProperty(propertyName, out value))
+                return false;
+        }
+
+        remainder = bracketIndex >= 0 ? remainder[bracketIndex..] : string.Empty;
+        while (!string.IsNullOrEmpty(remainder))
+        {
+            if (remainder[0] != '[') return false;
+            var end = remainder.IndexOf(']');
+            if (end <= 1) return false;
+
+            var indexText = remainder[1..end];
+            if (!int.TryParse(indexText, out var index) || value.ValueKind != JsonValueKind.Array)
+                return false;
+
+            var arrayValues = value.EnumerateArray().ToList();
+            if (index < 0 || index >= arrayValues.Count) return false;
+            value = arrayValues[index];
+            remainder = remainder[(end + 1)..];
+        }
+
+        return true;
+    }
+
     private static string JsonToQueryString(string inputJson)
     {
         try
@@ -138,6 +374,12 @@ public class LabTestRunner(IHttpClientFactory httpClientFactory, ILogger<LabTest
         }
         catch { return string.Empty; }
     }
+
+    private static string TrimResponse(string response) =>
+        response.Length > 1000 ? response[..1000] : response;
+
+    private static bool IsAuthorizationHeader(string name) =>
+        name.Equals("Authorization", StringComparison.OrdinalIgnoreCase);
 
     private static LabTestCaseResult Fail(LabTestCase tc, Guid jobId, string url, string message) => new()
     {

@@ -2,11 +2,15 @@ using System.Text.Json;
 using GradingSystem.Application.Common;
 using GradingSystem.Application.Exceptions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Hosting;
 using Npgsql;
 
 namespace GradingSystem.Api.Middleware;
 
-public class GlobalExceptionMiddleware(RequestDelegate next, ILogger<GlobalExceptionMiddleware> logger)
+public class GlobalExceptionMiddleware(
+    RequestDelegate next,
+    ILogger<GlobalExceptionMiddleware> logger,
+    IHostEnvironment environment)
 {
     private static readonly JsonSerializerOptions _jsonOpts = new(JsonSerializerDefaults.Web);
 
@@ -19,11 +23,11 @@ public class GlobalExceptionMiddleware(RequestDelegate next, ILogger<GlobalExcep
         catch (Exception ex)
         {
             logger.LogError(ex, "Unhandled exception {TraceId}", context.TraceIdentifier);
-            await WriteErrorAsync(context, ex);
+            await WriteErrorAsync(context, ex, environment.IsDevelopment());
         }
     }
 
-    private static async Task WriteErrorAsync(HttpContext context, Exception ex)
+    private static async Task WriteErrorAsync(HttpContext context, Exception ex, bool includeDetails)
     {
         var (status, message) = ex switch
         {
@@ -44,7 +48,20 @@ public class GlobalExceptionMiddleware(RequestDelegate next, ILogger<GlobalExcep
         context.Response.StatusCode = status;
         context.Response.ContentType = "application/json";
 
-        var body = ApiResponse.Fail(message, traceId: context.TraceIdentifier);
+        var body = includeDetails
+            ? ApiResponse.Fail(
+                message,
+                BuildErrors(ex),
+                context.TraceIdentifier)
+            : ApiResponse.Fail(message, traceId: context.TraceIdentifier);
         await context.Response.WriteAsync(JsonSerializer.Serialize(body, _jsonOpts));
+    }
+
+    private static IEnumerable<string> BuildErrors(Exception ex)
+    {
+        var errors = new List<string> { $"{ex.GetType().Name}: {ex.Message}" };
+        if (!string.IsNullOrWhiteSpace(ex.InnerException?.Message))
+            errors.Add($"Inner: {ex.InnerException.Message}");
+        return errors;
     }
 }

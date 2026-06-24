@@ -23,6 +23,7 @@ public partial class DockerComposeRunner(
     private static readonly string WorkRoot = Path.Combine(Path.GetTempPath(), "lab-grading");
     private static readonly string DockerFallbackWorkingDirectory = Path.GetTempPath();
     private const int MaxDockerOutputChars = 12_000;
+    private static int _completedLabJobs;
     private readonly ConcurrentDictionary<Guid, string> _composeDirs = new();
 
     [GeneratedRegex(@"^( {2}|\t)([a-zA-Z0-9][a-zA-Z0-9_.-]*):\s*(?:#.*)?$")]
@@ -327,17 +328,7 @@ public partial class DockerComposeRunner(
         await RemoveResourcesByLabelAsync(jobId, "image", "image", ["ls", "-q", "--filter", $"label=com.docker.compose.project={project}"], ["image", "rm", "-f"]);
 
         if (removeWorkDir)
-        {
-            await _pruneLock.WaitAsync(ct);
-            try
-            {
-                await PruneBuildCacheAsync(jobId);
-            }
-            finally
-            {
-                _pruneLock.Release();
-            }
-        }
+            await PruneBuildCacheIfDueAsync(jobId, ct);
 
         if (!removeWorkDir) return;
 
@@ -378,23 +369,40 @@ public partial class DockerComposeRunner(
                 ids.Length, resourceName, jobId);
     }
 
-    private async Task PruneBuildCacheAsync(Guid jobId)
+    private async Task PruneBuildCacheIfDueAsync(Guid jobId, CancellationToken ct)
     {
-        var timeout = TimeSpan.FromMinutes(2);
-        var pruneResult = await RunCleanupCommandAsync(
-            jobId, DockerFallbackWorkingDirectory, timeout, "buildx", "prune", "-a", "-f");
-        if (pruneResult.ExitCode != 0)
-        {
-            pruneResult = await RunCleanupCommandAsync(
-                jobId, DockerFallbackWorkingDirectory, timeout, "builder", "prune", "-a", "-f");
-        }
+        var interval = opts.Value.LabDockerBuildCachePruneIntervalJobs;
+        if (interval <= 0) return;
 
-        if (pruneResult.ExitCode == 0)
+        var completed = Interlocked.Increment(ref _completedLabJobs);
+        if (completed % interval != 0) return;
+
+        await _pruneLock.WaitAsync(ct);
+        try
         {
-            logger.LogInformation(
-                "Docker build cache pruned for job {JobId}: {Output}",
+            var keepStorage = string.IsNullOrWhiteSpace(opts.Value.LabDockerBuildCacheKeepStorage)
+                ? "3GB"
+                : opts.Value.LabDockerBuildCacheKeepStorage;
+
+            var timeout = TimeSpan.FromMinutes(2);
+            var pruneResult = await RunCleanupCommandAsync(
                 jobId,
-                string.IsNullOrWhiteSpace(pruneResult.Output) ? "(no output)" : pruneResult.Output.Trim());
+                DockerFallbackWorkingDirectory,
+                timeout,
+                "builder", "prune", "-f", "--keep-storage", keepStorage);
+
+            if (pruneResult.ExitCode == 0)
+            {
+                logger.LogInformation(
+                    "Docker build cache pruned for job {JobId} with keep-storage={KeepStorage}: {Output}",
+                    jobId,
+                    keepStorage,
+                    string.IsNullOrWhiteSpace(pruneResult.Output) ? "(no output)" : pruneResult.Output.Trim());
+            }
+        }
+        finally
+        {
+            _pruneLock.Release();
         }
     }
 

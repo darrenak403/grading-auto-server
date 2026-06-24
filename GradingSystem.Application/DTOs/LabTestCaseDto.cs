@@ -9,6 +9,8 @@ public record CreateLabTestCaseRequest(
     string HttpMethod,
     string UrlTemplate,
     string? Description,
+    string? SaveTokenFrom,
+    [property: JsonConverter(typeof(JsonStringOrObjectConverter))] string? Headers,
     [property: JsonConverter(typeof(JsonStringOrObjectConverter))] string? InputJson,
     [property: JsonConverter(typeof(JsonStringOrObjectConverter))] string? ExpectJson,
     int ExpectedStatusCode = 200,
@@ -21,6 +23,8 @@ public record UpdateLabTestCaseRequest(
     string HttpMethod,
     string UrlTemplate,
     string? Description,
+    string? SaveTokenFrom,
+    [property: JsonConverter(typeof(JsonStringOrObjectConverter))] string? Headers,
     [property: JsonConverter(typeof(JsonStringOrObjectConverter))] string? InputJson,
     [property: JsonConverter(typeof(JsonStringOrObjectConverter))] string? ExpectJson,
     int ExpectedStatusCode,
@@ -36,6 +40,8 @@ public class LabTestCaseDto
     public string HttpMethod { get; init; } = null!;
     public string UrlTemplate { get; init; } = null!;
     public string? Description { get; init; }
+    public string? SaveTokenFrom { get; init; }
+    [JsonConverter(typeof(JsonStringOrObjectConverter))] public string? Headers { get; init; }
     [JsonConverter(typeof(JsonStringOrObjectConverter))] public string? InputJson { get; init; }
     [JsonConverter(typeof(JsonStringOrObjectConverter))] public string? ExpectJson { get; init; }
     public int ExpectedStatusCode { get; init; }

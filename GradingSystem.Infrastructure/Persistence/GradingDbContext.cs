@@ -132,6 +132,8 @@ public class GradingDbContext(DbContextOptions<GradingDbContext> options) : DbCo
         {
             e.Property(x => x.HttpMethod).HasMaxLength(10).IsRequired();
             e.Property(x => x.UrlTemplate).HasMaxLength(500).IsRequired();
+            e.Property(x => x.SaveTokenFrom).HasMaxLength(200);
+            e.Property(x => x.HeadersJson).HasColumnType("text");
             e.Property(x => x.Score).HasPrecision(5, 2);
             e.Property(x => x.Status).HasConversion<string>();
             e.Property(x => x.MatchMode).HasConversion<string>();

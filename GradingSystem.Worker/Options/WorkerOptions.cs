@@ -21,6 +21,9 @@ public class WorkerOptions
     // Lab Docker timeouts and resource limits
     public int LabDockerBuildTimeoutSeconds { get; set; } = 300;   // 5 min for build + start
     public int LabDockerDownTimeoutSeconds { get; set; } = 30;
+    public int LabDockerBuildCachePruneIntervalJobs { get; set; } = 5;
+    public string LabDockerBuildCacheKeepStorage { get; set; } = "3GB";
+    public int LabDockerBuildCacheFullPruneIntervalHours { get; set; } = 24;
     public string LabContainerMemoryLimit { get; set; } = "512m";
     public double LabContainerCpuLimit { get; set; } = 1.0;
 }

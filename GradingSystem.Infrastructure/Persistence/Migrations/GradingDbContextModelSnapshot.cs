@@ -313,6 +313,9 @@ namespace GradingSystem.Infrastructure.Persistence.Migrations
                     b.Property<string>("ExpectJson")
                         .HasColumnType("text");
 
+                    b.Property<string>("HeadersJson")
+                        .HasColumnType("text");
+
                     b.Property<int>("ExpectedStatusCode")
                         .HasColumnType("integer");
 
@@ -333,6 +336,10 @@ namespace GradingSystem.Infrastructure.Persistence.Migrations
 
                     b.Property<int>("Order")
                         .HasColumnType("integer");
+
+                    b.Property<string>("SaveTokenFrom")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
 
                     b.Property<decimal>("Score")
                         .HasPrecision(5, 2)

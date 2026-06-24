@@ -19,6 +19,8 @@ public class LabTestCaseService(IUnitOfWork uow) : ILabTestCaseService
             HttpMethod = req.HttpMethod,
             UrlTemplate = req.UrlTemplate,
             Description = req.Description,
+            SaveTokenFrom = req.SaveTokenFrom,
+            HeadersJson = req.Headers,
             InputJson = req.InputJson,
             ExpectJson = req.ExpectJson,
             ExpectedStatusCode = req.ExpectedStatusCode,
@@ -45,6 +47,8 @@ public class LabTestCaseService(IUnitOfWork uow) : ILabTestCaseService
         tc.HttpMethod = req.HttpMethod;
         tc.UrlTemplate = req.UrlTemplate;
         tc.Description = req.Description;
+        tc.SaveTokenFrom = req.SaveTokenFrom;
+        tc.HeadersJson = req.Headers;
         tc.InputJson = req.InputJson;
         tc.ExpectJson = req.ExpectJson;
         tc.ExpectedStatusCode = req.ExpectedStatusCode;
@@ -114,6 +118,8 @@ public class LabTestCaseService(IUnitOfWork uow) : ILabTestCaseService
                 HttpMethod = req.HttpMethod.ToUpperInvariant(),
                 UrlTemplate = req.UrlTemplate,
                 Description = req.Description,
+                SaveTokenFrom = req.SaveTokenFrom,
+                HeadersJson = req.Headers,
                 InputJson = req.InputJson,
                 ExpectJson = req.ExpectJson,
                 ExpectedStatusCode = req.ExpectedStatusCode,
@@ -189,6 +195,8 @@ public class LabTestCaseService(IUnitOfWork uow) : ILabTestCaseService
         HttpMethod = t.HttpMethod,
         UrlTemplate = t.UrlTemplate,
         Description = t.Description,
+        SaveTokenFrom = t.SaveTokenFrom,
+        Headers = t.HeadersJson,
         InputJson = t.InputJson,
         ExpectJson = t.ExpectJson,
         ExpectedStatusCode = t.ExpectedStatusCode,

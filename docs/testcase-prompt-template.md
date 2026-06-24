@@ -21,8 +21,15 @@ Content-Type: application/json
   "httpMethod": "GET",
   "urlTemplate": "/api/semesters/1",
   "description": "Get semester by ID",
+  "saveTokenFrom": null,
+  "headers": null,
   "inputJson": null,
-  "expectJson": "{\"success\":true,\"data\":{\"semesterId\":1}}",
+  "expectJson": {
+    "success": true,
+    "data": {
+      "semesterId": 1
+    }
+  },
   "expectedStatusCode": 200,
   "matchMode": "Subset",
   "score": 1.0
@@ -34,8 +41,10 @@ Content-Type: application/json
 | `httpMethod`         | `GET` `POST` `PUT` `DELETE` `PATCH` hoặc `SOURCE` (kiểm tra source code)                                          |
 | `urlTemplate`        | URL tương đối. Dùng ID cụ thể từ seed data (ví dụ `/api/semesters/1`) hoặc `{id}` placeholder                     |
 | `description`        | Nhãn hiển thị trong kết quả chấm                                                                                  |
-| `inputJson`          | POST/PUT: request body dạng JSON string. GET: query params dạng JSON string `"{\"page\":1}"`. `null` nếu không có |
-| `expectJson`         | Phần response cần kiểm tra dạng JSON string. `null` nếu dùng `StatusOnly`                                         |
+| `saveTokenFrom`      | Một hoặc nhiều JSON path để lấy giá trị từ response và lưu cho test case sau. Tách nhiều path bằng `;`. Ví dụ `$.data.accessToken;$.data.refreshToken` |
+| `headers`            | Header request dạng JSON object. `null` nếu không cần. Ví dụ `{"Authorization":"Bearer token"}`               |
+| `inputJson`          | POST/PUT: request body dạng JSON object. GET: query params đưa vào urlTemplate (vd `/api/v1/students?page=1&size=5`). `null` nếu không có |
+| `expectJson`         | Phần response cần kiểm tra dạng JSON object. `null` nếu dùng `StatusOnly`                                         |
 | `expectedStatusCode` | `200` `201` `204` `400` `404`                                                                                     |
 | `matchMode`          | `Subset` (mặc định) — `Exact` — `StatusOnly`                                                                      |
 | `score`              | Điểm của test case này                                                                                            |
@@ -45,6 +54,12 @@ Content-Type: application/json
 - `Subset` → response **chứa** các field trong expectJson (dùng hầu hết)
 - `StatusOnly` → chỉ check HTTP status, bỏ qua body (dùng cho DELETE 204, 404, 400, và tất cả `SOURCE`)
 - `Exact` → response phải khớp chính xác từng field (hiếm dùng)
+
+**Biến runtime giữa các test case:**
+
+- Nếu test case có `saveTokenFrom: "$.data.accessToken;$.data.refreshToken"` và response pass, worker sẽ lưu biến `accessToken`, alias `token`, và `refreshToken`
+- Test case sau có thể dùng `{{accessToken}}`, `{{token}}`, hoặc `{{refreshToken}}` trong `headers`, `inputJson`, hoặc `urlTemplate`
+- Ví dụ: `"Authorization": "Bearer {{token}}"`
 
 ---
 
@@ -174,35 +189,20 @@ Output must start with [ and end with ] and be directly parseable by JSON.parse(
 === FIELD SCHEMA ===
 
 {
-  "httpMethod": "SOURCE" | "GET" | "POST" | "PUT" | "DELETE",
+  "httpMethod": "SOURCE" | "GET" | "POST" | "PUT" | "DELETE" | "PATCH",
   "urlTemplate": "<relative URL or SOURCE rule>",
   "description": "<short English label>",
-  "inputJson": "<JSON escaped as string>" | null,
-  "expectJson": "<JSON escaped as string>" | null,
+  "saveTokenFrom": "<JSON path(s) to capture response value, separated by ;>" | null,
+  "headers": { ... } | null,
+  "inputJson": { ... } | null,
+  "expectJson": { ... } | null,
   "expectedStatusCode": 200 | 201 | 204,
   "matchMode": "Subset" | "StatusOnly",
   "score": <number with at most 1 decimal>
 }
 
-⚠️ CRITICAL — THE MOST COMMON MISTAKE — READ CAREFULLY:
-
-inputJson and expectJson MUST be a JSON STRING (double-quoted), NOT a JSON object or array.
-Every " inside the value MUST be escaped as \".
-
-  ✅ CORRECT: "expectJson": "{\"success\":true}"
-  ✅ CORRECT: "inputJson": "{\"studentId\":1,\"courseId\":1}"
-  ❌ WRONG:   "expectJson": {"success":true}            ← bare object → 400 Bad Request
-  ❌ WRONG:   "inputJson": {"studentId":1}              ← bare object → 400 Bad Request
-
-  No value → write: "inputJson": null   (bare null, no quotes around it)
-
-MANDATORY SELF-CHECK before outputting:
-  For every object in the array, verify:
-  1. "inputJson" value starts with " or is null  (never starts with {)
-  2. "expectJson" value starts with " or is null (never starts with {)
-  3. "expectedStatusCode" is present (200, 201, or 204) — never omit this field
-  4. No trailing comma after the last field in an object
-  5. No trailing comma after the last object in the array
+IMPORTANT:
+headers, inputJson and expectJson MUST be JSON objects or null. Do NOT wrap them as JSON strings.
 
 === SCORING ===
 
@@ -236,12 +236,20 @@ KEEP IT SIMPLE. For each entity in the spec, generate at most 2 HTTP test cases 
 Choose the most representative operations: prefer GET list and POST. Add DELETE only if score budget allows.
 
 Rules:
-- GET list: use query params matching the spec (search, page, sort, expand if required). expectJson: "{\"success\":true}", matchMode: Subset
-- POST: use a realistic request body. expectedStatusCode: 201 if spec says Created, else 200. expectJson: "{\"success\":true}", matchMode: Subset
+- GET list: put query params in urlTemplate (search, page, sort, expand if required). expectJson: {"success":true}, matchMode: Subset
+- POST: use a realistic request body. expectedStatusCode: 201 if spec says Created, else 200. expectJson: {"success":true}, matchMode: Subset
 - DELETE: use a HIGH seed ID (see below). expectedStatusCode: 204, matchMode: StatusOnly, expectJson: null
-- GET by ID: use seed id=1. expectJson: "{\"success\":true}", matchMode: Subset
+- GET by ID: use seed id=1. expectJson: {"success":true}, matchMode: Subset
+- If the spec requires authentication:
+  first create one login test case with saveTokenFrom:"$.data.accessToken;$.data.refreshToken"
+  then use headers: {"Authorization":"Bearer {{accessToken}}"} or {"Authorization":"Bearer {{token}}"} in later protected cases
+  and use "{{refreshToken}}" in refresh-token request body when needed
+  protected cases with Authorization header will automatically be checked by the worker with an additional anonymous request
+  headers:null means the endpoint is public and no automatic JWT protection check is performed
 - Do NOT test 400/404 error cases
+- Do NOT create separate 401/403 test cases for JWT protection; use Authorization header on protected success cases instead
 - Do NOT use {id} placeholder — always use a concrete number
+- Do NOT wrap headers/inputJson/expectJson as JSON strings
 
 SEED IDs:
   Semesters:   use id=1 for GET/PUT, id=5 for DELETE
@@ -272,14 +280,14 @@ SCORE DISTRIBUTION for GROUP B (must sum to 8.0):
 
 ## Ví dụ output mẫu (Lab 1 — LMS)
 
-Đây là mảng JSON mẫu AI nên trả về — **13 case, tổng = 10.0 điểm**:
+Đây là mảng JSON mẫu AI nên trả về — **11 case, tổng = 10.0 điểm**:
 
 ```json
 [
   {
     "httpMethod": "SOURCE",
     "urlTemplate": "project-count:3",
-    "description": "Solution has 3 .csproj files (3-layer)",
+    "description": "Solution has 3 .csproj files (3-layer architecture)",
     "inputJson": null,
     "expectJson": null,
     "expectedStatusCode": 200,
@@ -289,17 +297,17 @@ SCORE DISTRIBUTION for GROUP B (must sum to 8.0):
   {
     "httpMethod": "SOURCE",
     "urlTemplate": "file-exists:**/docker-compose.yml",
-    "description": "docker-compose.yml present",
+    "description": "docker-compose.yml present in submission",
     "inputJson": null,
     "expectJson": null,
     "expectedStatusCode": 200,
     "matchMode": "StatusOnly",
-    "score": 1.0
+    "score": 0.5
   },
   {
     "httpMethod": "SOURCE",
-    "urlTemplate": "file-not-contains:**/Controllers/*.cs:DbContext",
-    "description": "Controllers do not access DbContext directly",
+    "urlTemplate": "file-contains:**/Validators/*.cs:AbstractValidator",
+    "description": "FluentValidation implemented with AbstractValidator base class",
     "inputJson": null,
     "expectJson": null,
     "expectedStatusCode": 200,
@@ -307,104 +315,123 @@ SCORE DISTRIBUTION for GROUP B (must sum to 8.0):
     "score": 0.5
   },
   {
-    "httpMethod": "GET",
-    "urlTemplate": "/api/semesters",
-    "description": "List semesters with paging",
-    "inputJson": "{\"page\":1,\"size\":5}",
-    "expectJson": "{\"success\":true,\"data\":{\"pagination\":{\"page\":1}}}",
-    "expectedStatusCode": 200,
-    "matchMode": "Subset",
-    "score": 1.0
-  },
-  {
-    "httpMethod": "POST",
-    "urlTemplate": "/api/semesters",
-    "description": "Create a semester",
-    "inputJson": "{\"semesterName\":\"Test Semester\",\"startDate\":\"2025-01-01T00:00:00\",\"endDate\":\"2025-06-30T00:00:00\"}",
-    "expectJson": "{\"success\":true}",
-    "expectedStatusCode": 201,
-    "matchMode": "Subset",
-    "score": 1.0
-  },
-  {
-    "httpMethod": "GET",
-    "urlTemplate": "/api/students",
-    "description": "List students with search",
-    "inputJson": "{\"search\":\"nguyen\",\"page\":1,\"size\":5}",
-    "expectJson": "{\"success\":true}",
-    "expectedStatusCode": 200,
-    "matchMode": "Subset",
-    "score": 1.0
-  },
-  {
-    "httpMethod": "POST",
-    "urlTemplate": "/api/students",
-    "description": "Create a student",
-    "inputJson": "{\"fullName\":\"Nguyen Van A\",\"email\":\"a@test.com\",\"dateOfBirth\":\"2000-01-01T00:00:00\"}",
-    "expectJson": "{\"success\":true}",
-    "expectedStatusCode": 201,
-    "matchMode": "Subset",
-    "score": 1.0
-  },
-  {
-    "httpMethod": "GET",
-    "urlTemplate": "/api/subjects",
-    "description": "List subjects with paging",
-    "inputJson": "{\"page\":1,\"size\":5}",
-    "expectJson": "{\"success\":true}",
-    "expectedStatusCode": 200,
-    "matchMode": "Subset",
-    "score": 0.5
-  },
-  {
-    "httpMethod": "POST",
-    "urlTemplate": "/api/subjects",
-    "description": "Create a subject",
-    "inputJson": "{\"subjectCode\":\"SE001\",\"subjectName\":\"Software Engineering\",\"credit\":3}",
-    "expectJson": "{\"success\":true}",
-    "expectedStatusCode": 201,
-    "matchMode": "Subset",
-    "score": 0.5
-  },
-  {
-    "httpMethod": "GET",
-    "urlTemplate": "/api/courses",
-    "description": "List courses with paging",
-    "inputJson": "{\"page\":1,\"size\":5}",
-    "expectJson": "{\"success\":true}",
-    "expectedStatusCode": 200,
-    "matchMode": "Subset",
-    "score": 0.5
-  },
-  {
-    "httpMethod": "POST",
-    "urlTemplate": "/api/courses",
-    "description": "Create a course",
-    "inputJson": "{\"courseName\":\"Test Course\",\"semesterId\":1}",
-    "expectJson": "{\"success\":true}",
-    "expectedStatusCode": 201,
-    "matchMode": "Subset",
-    "score": 0.5
-  },
-  {
-    "httpMethod": "GET",
-    "urlTemplate": "/api/enrollments",
-    "description": "List enrollments with expand",
-    "inputJson": "{\"expand\":\"student,course\",\"page\":1,\"size\":10}",
-    "expectJson": "{\"success\":true}",
-    "expectedStatusCode": 200,
-    "matchMode": "Subset",
-    "score": 1.0
-  },
-  {
-    "httpMethod": "DELETE",
-    "urlTemplate": "/api/enrollments/500",
-    "description": "Delete an enrollment",
+    "httpMethod": "SOURCE",
+    "urlTemplate": "file-exists:**/Middleware/*Exception*.cs",
+    "description": "Global Exception Handling Middleware exists",
     "inputJson": null,
     "expectJson": null,
-    "expectedStatusCode": 204,
+    "expectedStatusCode": 200,
     "matchMode": "StatusOnly",
+    "score": 0.5
+  },
+  {
+    "httpMethod": "POST",
+    "urlTemplate": "/api/auth/login",
+    "description": "POST Admin Login to obtain JWT Token",
+    "inputJson": {
+      "username": "admin",
+      "password": "123456"
+    },
+    "expectJson": {
+      "success": true
+    },
+    "saveTokenFrom": "$.data.accessToken",
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "expectedStatusCode": 200,
+    "matchMode": "Subset",
+    "score": 1.5
+  },
+  {
+    "httpMethod": "GET",
+    "urlTemplate": "/api/v1/students?page=1&size=5",
+    "description": "GET Students list with pagination (V1)",
+    "inputJson": null,
+    "expectJson": {
+      "success": true
+    },
+    "headers": {
+      "Authorization": "Bearer {{token}}"
+    },
+    "expectedStatusCode": 200,
+    "matchMode": "Subset",
     "score": 1.0
+  },
+  {
+    "httpMethod": "GET",
+    "urlTemplate": "/api/v2/students?page=1&size=5",
+    "description": "GET Students list with pagination (V2 versioning)",
+    "inputJson": null,
+    "expectJson": {
+      "success": true
+    },
+    "headers": {
+      "Authorization": "Bearer {{token}}"
+    },
+    "expectedStatusCode": 200,
+    "matchMode": "Subset",
+    "score": 1.0
+  },
+  {
+    "httpMethod": "GET",
+    "urlTemplate": "/api/v1/courses?page=1&size=5",
+    "description": "GET Courses list with pagination",
+    "inputJson": null,
+    "expectJson": {
+      "success": true
+    },
+    "headers": {
+      "Authorization": "Bearer {{token}}"
+    },
+    "expectedStatusCode": 200,
+    "matchMode": "Subset",
+    "score": 1.0
+  },
+  {
+    "httpMethod": "GET",
+    "urlTemplate": "/api/v1/subjects?page=1&size=5",
+    "description": "GET Subjects list with pagination",
+    "inputJson": null,
+    "expectJson": {
+      "success": true
+    },
+    "headers": {
+      "Authorization": "Bearer {{token}}"
+    },
+    "expectedStatusCode": 200,
+    "matchMode": "Subset",
+    "score": 1.0
+  },
+  {
+    "httpMethod": "GET",
+    "urlTemplate": "/api/v1/semesters?page=1&size=5",
+    "description": "GET Semesters list with pagination",
+    "inputJson": null,
+    "expectJson": {
+      "success": true
+    },
+    "headers": {
+      "Authorization": "Bearer {{token}}"
+    },
+    "expectedStatusCode": 200,
+    "matchMode": "Subset",
+    "score": 1.0
+  },
+  {
+    "httpMethod": "GET",
+    "urlTemplate": "/api/v1/enrollments?page=1&size=5",
+    "description": "GET Enrollments list with pagination",
+    "inputJson": null,
+    "expectJson": {
+      "success": true
+    },
+    "headers": {
+      "Authorization": "Bearer {{token}}"
+    },
+    "expectedStatusCode": 200,
+    "matchMode": "Subset",
+    "score": 1.5
   }
 ]
 ```

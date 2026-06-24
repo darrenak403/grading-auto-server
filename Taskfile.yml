@@ -37,10 +37,32 @@ tasks:
     deps: [_env]
     cmd: '{{.COMPOSE}} down'
 
+  clear:
+    desc: Xóa toàn bộ dev volumes (Postgres, SQL Server, RabbitMQ) để reset DB từ đầu
+    deps: [_env]
+    cmd: '{{.COMPOSE}} down -v --remove-orphans'
+
+  cache:
+    desc: Xóa toàn bộ Docker build cache
+    cmd: docker builder prune -a -f
+
+  cache:keep:
+    desc: Dọn Docker build cache nhưng giữ lại khoảng 3GB cache gần nhất
+    cmd: docker builder prune -f --keep-storage 3GB
+
   logs:
     desc: Xem log infra
     deps: [_env]
     cmd: '{{.COMPOSE}} logs -f --tail=100'
+
+  migrate:
+    desc: Chạy EF migration cho Postgres local
+    dotenv: ['docker/.env.local']
+    env:
+      ASPNETCORE_ENVIRONMENT: Development
+    cmds:
+      - dotnet build GradingSystem.Api/GradingSystem.Api.csproj
+      - dotnet ef database update --no-build --project GradingSystem.Infrastructure --startup-project GradingSystem.Api
 
   api:
     desc: Chạy API — http://localhost:5049/swagger
@@ -50,7 +72,9 @@ tasks:
     env:
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_URLS: http://localhost:5049
-    cmd: dotnet run
+    cmds:
+      - dotnet build -m:1
+      - dotnet run --no-build --no-restore
 
   worker:
     desc: Chạy Worker (grading background service)
@@ -59,7 +83,9 @@ tasks:
     dotenv: ['../docker/.env.local']
     env:
       ASPNETCORE_ENVIRONMENT: Development
-    cmd: dotnet run
+    cmds:
+      - dotnet build -m:1
+      - dotnet run --no-build --no-restore
 
   _env:
     internal: true
