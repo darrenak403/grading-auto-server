@@ -117,6 +117,86 @@ public partial class ExamSessionService(IUnitOfWork unitOfWork, IPublishEndpoint
         }).ToList();
     }
 
+    public async Task<ImportSessionParticipantsResultDto> ImportParticipantsByCodeAsync(
+        Guid sessionId, Stream csvStream, CancellationToken ct = default)
+    {
+        _ = await unitOfWork.ExamSessions.GetByIdAsync(sessionId)
+            ?? throw new NotFoundException($"ExamSession '{sessionId}' not found.");
+
+        var assignments = (await unitOfWork.Assignments.FindAsync(a => a.ExamSessionId == sessionId)).ToList();
+        var result = new ImportSessionParticipantsResultDto();
+        using var reader = new StreamReader(csvStream);
+
+        string? line;
+        int lineNumber = 0;
+        while ((line = await reader.ReadLineAsync(ct)) != null)
+        {
+            lineNumber++;
+            if (string.IsNullOrWhiteSpace(line)) continue;
+
+            if (lineNumber == 1 && CsvImportHelper.IsHeaderRow(line))
+                continue;
+
+            var parts = CsvImportHelper.SplitColumns(line);
+            if (parts.Length < 3)
+            {
+                result.Errors.Add(new ImportSessionParticipantsErrorDto
+                {
+                    Line = lineNumber,
+                    Raw = line,
+                    Reason = "expected 'username,studentCode,assignmentCode'.",
+                });
+                continue;
+            }
+
+            var username       = parts[0].ToLowerInvariant();
+            var studentCode    = parts[1];
+            var assignmentCode = parts[2];
+
+            var assignment = assignments.FirstOrDefault(a =>
+                string.Equals(a.Code, assignmentCode, StringComparison.OrdinalIgnoreCase));
+
+            if (assignment is null)
+            {
+                result.Skipped++;
+                result.Errors.Add(new ImportSessionParticipantsErrorDto
+                {
+                    Line = lineNumber,
+                    Raw = line,
+                    Reason = $"no assignment with code '{assignmentCode}' in this session.",
+                });
+                continue;
+            }
+
+            var existing = (await unitOfWork.Participants.FindAsync(
+                p => p.ExamSessionId == sessionId && p.Username == username)).FirstOrDefault();
+
+            if (existing is not null)
+            {
+                existing.StudentCode  = studentCode;
+                existing.AssignmentId = assignment.Id;
+                unitOfWork.Participants.Update(existing);
+                result.Updated++;
+            }
+            else
+            {
+                await unitOfWork.Participants.AddAsync(new Participant
+                {
+                    ExamSessionId = sessionId,
+                    Username      = username,
+                    StudentCode   = studentCode,
+                    AssignmentId  = assignment.Id,
+                });
+                result.Created++;
+            }
+        }
+
+        if (result.Created > 0 || result.Updated > 0)
+            await unitOfWork.SaveChangesAsync(ct);
+
+        return result;
+    }
+
     public async Task<IReadOnlyList<SessionSubmissionResultDto>> GetSessionResultsAsync(
         Guid sessionId, string? gradingRound, CancellationToken ct = default)
     {

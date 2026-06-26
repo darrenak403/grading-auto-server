@@ -43,6 +43,18 @@ public class ExamSessionsController(
         return Ok(participants);
     }
 
+    [HttpPost("exam-sessions/{id:guid}/participants/import")]
+    [Consumes("multipart/form-data")]
+    public async Task<IActionResult> ImportParticipantsByCodeAsync(Guid id, IFormFile file, CancellationToken ct)
+    {
+        if (file is null || file.Length == 0)
+            return BadRequest("CSV file is required.");
+
+        await using var stream = file.OpenReadStream();
+        var result = await examSessionService.ImportParticipantsByCodeAsync(id, stream, ct);
+        return Ok(result, $"Imported {result.Created} created, {result.Updated} updated, {result.Skipped} skipped.");
+    }
+
     [HttpGet("exam-sessions/{id:guid}/results")]
     public async Task<IActionResult> GetResultsAsync(
         Guid id,

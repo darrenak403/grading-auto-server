@@ -10,4 +10,5 @@ public interface IExamSessionService
     Task<ExamSessionDto> DeleteAsync(Guid id, CancellationToken ct = default);
     Task<IReadOnlyList<ParticipantDto>> GetParticipantsAsync(Guid sessionId, CancellationToken ct = default);
     Task<IReadOnlyList<SessionSubmissionResultDto>> GetSessionResultsAsync(Guid sessionId, string? gradingRound, CancellationToken ct = default);
+    Task<ImportSessionParticipantsResultDto> ImportParticipantsByCodeAsync(Guid sessionId, Stream csvStream, CancellationToken ct = default);
 }
