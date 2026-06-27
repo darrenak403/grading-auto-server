@@ -22,7 +22,7 @@ public class TestRunner(
     private readonly string _bindHost = workerOpts.Value.BindHost;
     private readonly PlaywrightOptions _playwright = playwrightOpts.Value;
 
-    public async Task RunAsync(GradingJob job, StudentContext ctx, IUnitOfWork uow, CancellationToken ct)
+    public virtual async Task RunAsync(GradingJob job, StudentContext ctx, IUnitOfWork uow, CancellationToken ct)
     {
         var questions = (await uow.Questions.FindAsync(q => q.AssignmentId == job.Submission.AssignmentId))
                         .OrderBy(q => q.CreatedAt).ToList();

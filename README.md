@@ -131,6 +131,10 @@ storage/
 
 - API versioning: v1 (mặc định), v2.
 - Upload tối đa **200 MB**.
-- Worker: mặc định **3** job đồng thời (cấu hình trong `.env` / appsettings).
+- **Worker concurrency:**
+  - `MaxConcurrentJobs`: Mặc định = `Math.Clamp(CoreCount - 1, 1, 8)` (tự động theo CPU).
+    Cấu hình trong `.env` qua `WORKER_MAX_CONCURRENT_JOBS` hoặc appsettings.json (`Worker:MaxConcurrentJobs`).
+  - `SubmissionTimeoutSeconds`: Mặc định = **90 giây**. Cấu hình qua `WORKER_SUBMISSION_TIMEOUT_SECONDS`.
+    Timeout này áp dụng toàn bộ quá trình chấm một bài (artifact run + test execution); vượt quá sẽ kill process và mark Failed.
 - Điểm: `FinalScore = AdjustedScore ?? AutoScore`.
 - Q1: database tạm trên SQL Server, xóa sau khi chấm.

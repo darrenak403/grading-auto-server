@@ -38,13 +38,15 @@ RabbitMQ: http://localhost:15672
 
 Copy từ `docker/.env.example` rồi điền:
 
-| Biến | Ý nghĩa | Ví dụ |
-|------|---------|-------|
-| `POSTGRES_PASSWORD` | Mật khẩu Postgres | `postgres` |
-| `POSTGRES_PUBLISH_PORT` | Port Postgres ra host | `5439` |
-| `MSSQL_SA_PASSWORD` | Mật khẩu SQL Server | `YourStr0ng!Pass` |
-| `RABBITMQ_USER` | RabbitMQ username | `guest` |
-| `RABBITMQ_PASS` | RabbitMQ password | `guest` |
+| Biến | Ý nghĩa | Ví dụ | Ghi chú |
+|------|---------|-------|--------|
+| `POSTGRES_PASSWORD` | Mật khẩu Postgres | `postgres` | |
+| `POSTGRES_PUBLISH_PORT` | Port Postgres ra host | `5439` | Phải khớp với connection string |
+| `MSSQL_SA_PASSWORD` | Mật khẩu SQL Server | `YourStr0ng!Pass` | |
+| `RABBITMQ_USER` | RabbitMQ username | `guest` | |
+| `RABBITMQ_PASS` | RabbitMQ password | `guest` | |
+| `WORKER_MAX_CONCURRENT_JOBS` | Số job chấm song song (PE) | `3` (mặc định: auto từ CPU) | Nếu không đặt → `Math.Clamp(CoreCount - 1, 1, 8)` |
+| `WORKER_SUBMISSION_TIMEOUT_SECONDS` | Timeout per bài (giây) | `90` | Vượt quá → kill process, mark Failed |
 
 > `POSTGRES_PUBLISH_PORT` phải khớp với `appsettings.Development.json` (connection string).
 
