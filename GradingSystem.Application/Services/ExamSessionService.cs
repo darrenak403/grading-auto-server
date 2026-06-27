@@ -212,6 +212,11 @@ public partial class ExamSessionService(IUnitOfWork unitOfWork, IPublishEndpoint
         var usernameByStudentCode = participants.ToDictionary(p => p.StudentCode, p => p.Username, StringComparer.OrdinalIgnoreCase);
 
         var submissionsQuery = await unitOfWork.Submissions.FindAsync(s => assignmentIds.Contains(s.AssignmentId));
+        var allRoundsInScope = submissionsQuery.Select(s => s.GradingRound).ToHashSet();
+        if (gradingRound is null && allRoundsInScope.Count > 1)
+            throw new BadRequestException(
+                "This exam session has assignments with multiple grading rounds; specify gradingRound to view results.");
+
         var submissions = (gradingRound != null
             ? submissionsQuery.Where(s => s.GradingRound == gradingRound)
             : submissionsQuery).ToList();

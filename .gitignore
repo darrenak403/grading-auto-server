@@ -484,3 +484,5 @@ test-*.ps1
 .mcp.json
 
 plans
+
+global.json

@@ -173,7 +173,7 @@ services:
     image: chromedp/headless-shell:latest
     container_name: grading-dev-chromium
     restart: unless-stopped
-    command: ['--remote-debugging-port=9222', '--remote-debugging-address=0.0.0.0', '--no-sandbox']
+    command: ['--no-sandbox']
     ports:
       - '127.0.0.1:${PLAYWRIGHT_CDP_PORT:-9222}:9222'
     extra_hosts:

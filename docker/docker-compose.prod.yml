@@ -116,7 +116,7 @@ services:
     image: chromedp/headless-shell:latest
     container_name: grading-chromium
     restart: unless-stopped
-    command: ['--remote-debugging-port=9222', '--remote-debugging-address=0.0.0.0', '--no-sandbox']
+    command: ['--no-sandbox']
     networks:
       - grading-network
 

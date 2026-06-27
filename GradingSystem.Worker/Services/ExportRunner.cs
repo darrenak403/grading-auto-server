@@ -2,6 +2,7 @@ using System.Drawing;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using GradingSystem.Application.Common;
+using GradingSystem.Application.Exceptions;
 using GradingSystem.Application.Interfaces;
 using GradingSystem.Domain.Entities;
 using OfficeOpenXml;
@@ -68,6 +69,10 @@ public partial class ExportRunner(
                 .OrderBy(tc => tc.CreatedAt).ToList();
 
         var submissionsQuery = await uow.Submissions.FindAsync(s => s.AssignmentId == assignmentId);
+        if (gradingRound is null && submissionsQuery.Select(s => s.GradingRound).Distinct().Count() > 1)
+            throw new BadRequestException(
+                $"Assignment {assignmentId} has multiple grading rounds; specify gradingRound to export.");
+
         var submissions = (gradingRound != null
             ? submissionsQuery.Where(s => s.GradingRound == gradingRound)
             : submissionsQuery).ToList();
