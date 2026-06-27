@@ -42,6 +42,16 @@ tasks:
     deps: [_env]
     cmd: '{{.COMPOSE}} down -v --remove-orphans'
 
+  playwright:up:
+    desc: Khởi động Chromium CDP (cho chấm PE câu Razor) — bật riêng, không nằm trong task up
+    deps: [_env]
+    cmd: '{{.COMPOSE}} --profile playwright up -d chromium'
+
+  playwright:down:
+    desc: Tắt Chromium CDP
+    deps: [_env]
+    cmd: '{{.COMPOSE}} --profile playwright rm -sf chromium'
+
   cache:
     desc: Xóa toàn bộ Docker build cache
     cmd: docker builder prune -a -f
