@@ -16,11 +16,13 @@ public class SubmissionService(IUnitOfWork uow, IPublishEndpoint publishEndpoint
         if (entity is null) return null;
 
         var results = await uow.QuestionResults.FindAsync(r => r.SubmissionId == id);
-        return MapWithScore(entity, results.ToList());
+        var jobs = await uow.GradingJobs.FindAsync(j => j.SubmissionId == id);
+        var latestStatus = LatestJobStatus(jobs.ToList());
+        return MapWithScore(entity, results.ToList(), latestStatus);
     }
 
     public async Task<IReadOnlyList<SubmissionDto>> GetByAssignmentIdAsync(
-        Guid assignmentId, string? studentCode, CancellationToken ct = default)
+        Guid assignmentId, string? studentCode, string? gradingRound, CancellationToken ct = default)
     {
         _ = await uow.Assignments.GetByIdAsync(assignmentId)
             ?? throw new NotFoundException($"Assignment '{assignmentId}' not found.");
@@ -31,20 +33,50 @@ public class SubmissionService(IUnitOfWork uow, IPublishEndpoint publishEndpoint
             submissions = submissions.Where(s =>
                 s.StudentCode.Contains(studentCode, StringComparison.OrdinalIgnoreCase));
 
+        if (!string.IsNullOrWhiteSpace(gradingRound))
+            submissions = submissions.Where(s => s.GradingRound == gradingRound);
+
         var list = submissions.OrderBy(s => s.CreatedAt).ToList();
 
-        // Batch-load all results for these submissions
+        // Batch-load all results and jobs for these submissions
         var ids = list.Select(s => s.Id).ToHashSet();
         var allResults = await uow.QuestionResults.FindAsync(r => ids.Contains(r.SubmissionId));
         var resultsBySubmission = allResults.GroupBy(r => r.SubmissionId)
                                             .ToDictionary(g => g.Key, g => g.ToList());
 
+        var allJobs = await uow.GradingJobs.FindAsync(j => ids.Contains(j.SubmissionId));
+        var jobsBySubmission = allJobs.GroupBy(j => j.SubmissionId)
+                                      .ToDictionary(g => g.Key, g => g.ToList());
+
         return list.Select(s =>
         {
             resultsBySubmission.TryGetValue(s.Id, out var res);
-            return MapWithScore(s, res);
+            jobsBySubmission.TryGetValue(s.Id, out var jobs);
+            return MapWithScore(s, res, LatestJobStatus(jobs));
         }).ToList();
     }
+
+    public async Task<IReadOnlyList<string>> GetRoundsAsync(Guid assignmentId, CancellationToken ct = default)
+    {
+        _ = await uow.Assignments.GetByIdAsync(assignmentId)
+            ?? throw new NotFoundException($"Assignment '{assignmentId}' not found.");
+
+        var submissions = await uow.Submissions.FindAsync(s => s.AssignmentId == assignmentId);
+
+        return submissions
+            .GroupBy(s => s.GradingRound)
+            .Select(g => new { Round = g.Key, FirstSeen = g.Min(s => s.CreatedAt) })
+            .OrderBy(x => x.FirstSeen)
+            .Select(x => x.Round)
+            .ToList();
+    }
+
+    // Most recently created grading job, regardless of status — used for round-selector
+    // "latest job status" display and Retry-button gating (Failed-only, see RegradeAsync).
+    private static JobStatus? LatestJobStatus(IList<GradingJob>? jobs) =>
+        jobs is { Count: > 0 }
+            ? jobs.OrderByDescending(j => j.CreatedAt).ThenByDescending(j => j.Id).First().Status
+            : null;
 
     public async Task<IEnumerable<QuestionResultDto>> GetResultsAsync(Guid submissionId, CancellationToken ct = default)
     {
@@ -90,15 +122,19 @@ public class SubmissionService(IUnitOfWork uow, IPublishEndpoint publishEndpoint
         if (!submission.HasArtifact || string.IsNullOrEmpty(submission.ArtifactZipPath))
             throw new BadRequestException("Submission has no artifact to grade.");
 
+        var jobs = (await uow.GradingJobs.FindAsync(j => j.SubmissionId == submissionId)).ToList();
+
         // A Running job must be allowed to finish; a Pending job already represents the next run.
         // Refuse to enqueue another job (and purge results) while one is still in flight, otherwise
         // two Worker consumers could write QuestionResult rows for the same submission concurrently.
-        var hasActiveJob = (await uow.GradingJobs.FindAsync(j =>
-            j.SubmissionId == submissionId &&
-            (j.Status == JobStatus.Pending || j.Status == JobStatus.Running)))
-            .Any();
+        var hasActiveJob = jobs.Any(j => j.Status == JobStatus.Pending || j.Status == JobStatus.Running);
         if (hasActiveJob)
             throw new BadRequestException("Submission is already being graded.");
+
+        // Retry only exists to recover from an infra failure: refuse to re-run a submission
+        // that has never been graded yet, or whose latest attempt already succeeded.
+        if (LatestJobStatus(jobs) != JobStatus.Failed)
+            throw new BadRequestException("Submission can only be retried after a failed grading attempt.");
 
         // Clear stale QuestionResult rows from any previous grading attempt so
         // results don't accumulate across regrades (same purge pattern as bulk TriggerGradeAsync).
@@ -129,9 +165,10 @@ public class SubmissionService(IUnitOfWork uow, IPublishEndpoint publishEndpoint
         };
     }
 
-    private static SubmissionDto Map(Submission e) => MapWithScore(e, null);
+    private static SubmissionDto Map(Submission e) => MapWithScore(e, null, null);
 
-    private static SubmissionDto MapWithScore(Submission e, IList<QuestionResult>? results) => new()
+    private static SubmissionDto MapWithScore(
+        Submission e, IList<QuestionResult>? results, JobStatus? latestJobStatus) => new()
     {
         Id              = e.Id,
         AssignmentId    = e.AssignmentId,
@@ -141,6 +178,8 @@ public class SubmissionService(IUnitOfWork uow, IPublishEndpoint publishEndpoint
         CreatedAt       = e.CreatedAt,
         TotalScore      = results is { Count: > 0 } ? results.Sum(r => r.FinalScore) : null,
         MaxScore        = results is { Count: > 0 } ? results.Sum(r => r.MaxScore)   : null,
+        GradingRound    = e.GradingRound,
+        LatestJobStatus = latestJobStatus,
     };
 
     private static readonly System.Text.Json.JsonSerializerOptions _jsonOpts =

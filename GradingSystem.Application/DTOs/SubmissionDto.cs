@@ -14,4 +14,7 @@ public class SubmissionDto
     public DateTime CreatedAt { get; set; }
     public decimal? TotalScore { get; set; }
     public int? MaxScore { get; set; }
+    public string GradingRound { get; set; } = string.Empty;
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public JobStatus? LatestJobStatus { get; set; }
 }

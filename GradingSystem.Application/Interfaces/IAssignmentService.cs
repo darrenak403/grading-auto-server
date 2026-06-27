@@ -16,5 +16,6 @@ public interface IAssignmentService
     Task<AssignmentDto> DeleteAsync(Guid assignmentId, CancellationToken ct = default);
     Task<ImportParticipantsResultDto> ImportParticipantsAsync(Guid assignmentId, Stream csvStream, CancellationToken ct = default);
     Task<IReadOnlyList<ParticipantDto>> GetParticipantsAsync(Guid assignmentId, CancellationToken ct = default);
-    Task<int> TriggerGradeAsync(Guid assignmentId, string gradingRound, CancellationToken ct = default);
+    /// <summary>Always operates on the assignment's latest existing grading round.</summary>
+    Task<int> TriggerGradeAsync(Guid assignmentId, CancellationToken ct = default);
 }

@@ -235,10 +235,14 @@ public class AssignmentService(IUnitOfWork unitOfWork, IConfiguration configurat
         }).ToList();
     }
 
-    public async Task<int> TriggerGradeAsync(Guid assignmentId, string gradingRound, CancellationToken ct = default)
+    public async Task<int> TriggerGradeAsync(Guid assignmentId, CancellationToken ct = default)
     {
         _ = await unitOfWork.Assignments.GetByIdAsync(assignmentId)
             ?? throw new NotFoundException($"Assignment '{assignmentId}' not found.");
+
+        var existingRounds = (await unitOfWork.Submissions.FindAsync(s => s.AssignmentId == assignmentId))
+            .Select(s => s.GradingRound).Distinct().ToList();
+        var gradingRound = GradingRoundHelper.LatestRoundLabel(existingRounds);
 
         var submissions = (await unitOfWork.Submissions.FindAsync(
             s => s.AssignmentId == assignmentId
