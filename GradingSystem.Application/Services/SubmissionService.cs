@@ -2,11 +2,13 @@ using GradingSystem.Application.Common;
 using GradingSystem.Application.DTOs;
 using GradingSystem.Application.Exceptions;
 using GradingSystem.Application.Interfaces;
+using GradingSystem.Application.Messaging;
 using GradingSystem.Domain.Entities;
+using MassTransit;
 
 namespace GradingSystem.Application.Services;
 
-public class SubmissionService(IUnitOfWork uow) : ISubmissionService
+public class SubmissionService(IUnitOfWork uow, IPublishEndpoint publishEndpoint) : ISubmissionService
 {
     public async Task<SubmissionDto?> GetByIdAsync(Guid id, CancellationToken ct = default)
     {
@@ -78,6 +80,53 @@ public class SubmissionService(IUnitOfWork uow) : ISubmissionService
         await uow.SaveChangesAsync(ct);
 
         return Map(submission);
+    }
+
+    public async Task<GradingJobDto> RegradeAsync(Guid submissionId, CancellationToken ct = default)
+    {
+        var submission = await uow.Submissions.GetByIdAsync(submissionId)
+            ?? throw new NotFoundException($"Submission '{submissionId}' not found.");
+
+        if (!submission.HasArtifact || string.IsNullOrEmpty(submission.ArtifactZipPath))
+            throw new BadRequestException("Submission has no artifact to grade.");
+
+        // A Running job must be allowed to finish; a Pending job already represents the next run.
+        // Refuse to enqueue another job (and purge results) while one is still in flight, otherwise
+        // two Worker consumers could write QuestionResult rows for the same submission concurrently.
+        var hasActiveJob = (await uow.GradingJobs.FindAsync(j =>
+            j.SubmissionId == submissionId &&
+            (j.Status == JobStatus.Pending || j.Status == JobStatus.Running)))
+            .Any();
+        if (hasActiveJob)
+            throw new BadRequestException("Submission is already being graded.");
+
+        // Clear stale QuestionResult rows from any previous grading attempt so
+        // results don't accumulate across regrades (same purge pattern as bulk TriggerGradeAsync).
+        var staleResults = await uow.QuestionResults.FindAsync(r => r.SubmissionId == submissionId);
+        foreach (var stale in staleResults)
+            uow.QuestionResults.Remove(stale);
+
+        var job = new GradingJob
+        {
+            SubmissionId = submission.Id,
+            GradingRound = submission.GradingRound,
+            Status       = JobStatus.Pending,
+        };
+        submission.Status = SubmissionStatus.Grading;
+        uow.Submissions.Update(submission);
+        await uow.GradingJobs.AddAsync(job);
+        await uow.SaveChangesAsync(ct);
+        await publishEndpoint.Publish(new GradeJobMessage(job.Id), ct);
+
+        return new GradingJobDto
+        {
+            Id           = job.Id,
+            SubmissionId = job.SubmissionId,
+            Status       = job.Status,
+            ErrorMessage = job.ErrorMessage,
+            StartedAt    = job.StartedAt,
+            FinishedAt   = job.FinishedAt,
+        };
     }
 
     private static SubmissionDto Map(Submission e) => MapWithScore(e, null);

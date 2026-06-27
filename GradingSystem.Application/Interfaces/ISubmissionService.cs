@@ -8,4 +8,5 @@ public interface ISubmissionService
     Task<IReadOnlyList<SubmissionDto>> GetByAssignmentIdAsync(Guid assignmentId, string? studentCode, CancellationToken ct = default);
     Task<IEnumerable<QuestionResultDto>> GetResultsAsync(Guid submissionId, CancellationToken ct = default);
     Task<SubmissionDto> DeleteAsync(Guid submissionId, CancellationToken ct = default);
+    Task<GradingJobDto> RegradeAsync(Guid submissionId, CancellationToken ct = default);
 }

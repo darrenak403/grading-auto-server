@@ -249,6 +249,13 @@ public class AssignmentService(IUnitOfWork unitOfWork, IConfiguration configurat
         int enqueued = 0;
         foreach (var submission in submissions)
         {
+            // Clear any stale QuestionResult rows left over from a previous grading
+            // attempt on this submission/round, so results don't accumulate across re-triggers.
+            var staleResults = await unitOfWork.QuestionResults.FindAsync(
+                qr => qr.SubmissionId == submission.Id);
+            foreach (var stale in staleResults)
+                unitOfWork.QuestionResults.Remove(stale);
+
             var job = new GradingJob
             {
                 SubmissionId = submission.Id,

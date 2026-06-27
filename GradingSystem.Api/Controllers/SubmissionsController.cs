@@ -45,4 +45,11 @@ public class SubmissionsController(
         var deleted = await submissionService.DeleteAsync(id, ct);
         return Ok(deleted, "Submission deleted.");
     }
+
+    [HttpPost("submissions/{id:guid}/grade")]
+    public async Task<IActionResult> RegradeAsync(Guid id, CancellationToken ct)
+    {
+        var job = await submissionService.RegradeAsync(id, ct);
+        return Ok(job, "Regrade job queued.");
+    }
 }
