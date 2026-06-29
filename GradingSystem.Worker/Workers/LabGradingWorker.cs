@@ -82,38 +82,48 @@ public class LabGradingWorker(
 
     private async Task PublishPendingAsync(IUnitOfWork uow, CancellationToken ct)
     {
+        var maxConcurrent = Math.Max(1, opts.Value.LabMaxConcurrentJobs);
         var running = (await uow.LabGradingJobs.FindAsync(j => j.Status == LabGradingJobStatus.Running))
             .OrderBy(j => j.StartedAt ?? j.CreatedAt)
             .ThenBy(j => j.CreatedAt)
-            .FirstOrDefault();
-        if (running is not null)
+            .ToList();
+        var availableSlots = maxConcurrent - running.Count;
+        if (availableSlots <= 0)
         {
-            logger.LogDebug("Lab job {JobId} is still running — waiting before publishing the next job", running.Id);
+            logger.LogDebug(
+                "{RunningCount}/{MaxConcurrent} lab jobs are still running — waiting before publishing more jobs",
+                running.Count,
+                maxConcurrent);
             return;
         }
 
-        var job = (await uow.LabGradingJobs.FindAsync(j => j.Status == LabGradingJobStatus.Pending))
+        var jobs = (await uow.LabGradingJobs.FindAsync(j => j.Status == LabGradingJobStatus.Pending))
             .OrderBy(j => j.CreatedAt)
-            .FirstOrDefault();
-        if (job is null) return;
+            .Take(availableSlots)
+            .ToList();
+        if (jobs.Count == 0) return;
 
-        // Reserve exactly one job. The pipeline accepts Running jobs, and no next job is
-        // published until this one is saved as Done/Failed.
-        job.Status = LabGradingJobStatus.Running;
-        uow.LabGradingJobs.Update(job);
+        foreach (var job in jobs)
+        {
+            job.Status = LabGradingJobStatus.Running;
+            uow.LabGradingJobs.Update(job);
+        }
         await uow.SaveChangesAsync(ct);
 
-        try
+        foreach (var job in jobs)
         {
-            await bus.Publish(new LabGradeJobMessage(job.Id), ct);
-            logger.LogInformation("Enqueued lab job {JobId}", job.Id);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            logger.LogError(ex, "Failed to publish lab job {JobId} — resetting to Pending", job.Id);
-            job.Status = LabGradingJobStatus.Pending;
-            uow.LabGradingJobs.Update(job);
-            await uow.SaveChangesAsync(ct);
+            try
+            {
+                await bus.Publish(new LabGradeJobMessage(job.Id), ct);
+                logger.LogInformation("Enqueued lab job {JobId}", job.Id);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogError(ex, "Failed to publish lab job {JobId} — resetting to Pending", job.Id);
+                job.Status = LabGradingJobStatus.Pending;
+                uow.LabGradingJobs.Update(job);
+                await uow.SaveChangesAsync(ct);
+            }
         }
     }
 }

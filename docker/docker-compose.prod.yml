@@ -126,6 +126,7 @@ services:
       RabbitMQ__Username: ${RABBITMQ_USER}
       RabbitMQ__Password: ${RABBITMQ_PASSWORD}
       Worker__MaxConcurrentJobs: ${WORKER_MAX_CONCURRENT_JOBS:-3}
+      Worker__LabMaxConcurrentJobs: ${WORKER_LAB_MAX_CONCURRENT_JOBS:-1}
       Worker__PollIntervalSeconds: ${WORKER_POLL_INTERVAL_SECONDS:-5}
       Worker__ArtifactHealthCheckTimeoutSeconds: ${WORKER_ARTIFACT_HEALTH_TIMEOUT_SECONDS:-30}
       Worker__ArtifactPortRangeStart: ${WORKER_ARTIFACT_PORT_RANGE_START:-7000}
@@ -137,12 +138,19 @@ services:
       Worker__LabApiPortRangeEnd: ${WORKER_LAB_API_PORT_END:-16000}
       Worker__LabDbPortRangeStart: ${WORKER_LAB_DB_PORT_START:-14000}
       Worker__LabDbPortRangeEnd: ${WORKER_LAB_DB_PORT_END:-14999}
-      Worker__LabDockerHealthCheckTimeoutSeconds: ${WORKER_LAB_HEALTH_TIMEOUT:-120}
+      Worker__LabDockerHealthCheckTimeoutSeconds: ${WORKER_LAB_HEALTH_TIMEOUT:-60}
+      Worker__LabDockerHealthCheckIntervalSeconds: ${WORKER_LAB_HEALTH_INTERVAL:-1}
+      Worker__LabDockerHealthCheckRequiredConsecutiveSuccesses: ${WORKER_LAB_HEALTH_REQUIRED_SUCCESSES:-2}
+      Worker__LabDockerHealthCheckPaths: ${WORKER_LAB_HEALTH_PATHS:-/health,/swagger/v1/swagger.json,/swagger,/}
       Worker__LabDockerBuildTimeoutSeconds: ${WORKER_LAB_BUILD_TIMEOUT:-300}
       Worker__LabDockerDownTimeoutSeconds: ${WORKER_LAB_DOWN_TIMEOUT:-30}
       Worker__LabDockerBuildCachePruneIntervalJobs: ${WORKER_LAB_BUILD_CACHE_PRUNE_INTERVAL_JOBS:-5}
       Worker__LabDockerBuildCacheKeepStorage: ${WORKER_LAB_BUILD_CACHE_KEEP_STORAGE:-3GB}
       Worker__LabDockerBuildCacheFullPruneIntervalHours: ${WORKER_LAB_BUILD_CACHE_FULL_PRUNE_INTERVAL_HOURS:-24}
+      Worker__LabDockerRemoveImagesOnCleanup: ${WORKER_LAB_REMOVE_IMAGES_ON_CLEANUP:-false}
+      Worker__LabDockerSystemPruneIntervalHours: ${WORKER_LAB_SYSTEM_PRUNE_INTERVAL_HOURS:-6}
+      Worker__LabDockerSystemPruneReclaimableThresholdGb: ${WORKER_LAB_SYSTEM_PRUNE_RECLAIMABLE_THRESHOLD_GB:-15}
+      Worker__LabDockerSystemPruneVolumes: ${WORKER_LAB_SYSTEM_PRUNE_VOLUMES:-true}
       Worker__LabContainerMemoryLimit: ${WORKER_LAB_MEMORY_LIMIT:-512m}
       Worker__LabContainerCpuLimit: ${WORKER_LAB_CPU_LIMIT:-1.0}
     volumes:

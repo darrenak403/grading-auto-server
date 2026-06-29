@@ -1,5 +1,7 @@
 using GradingSystem.Application.Interfaces;
 using GradingSystem.Domain.Entities;
+using GradingSystem.Worker.Options;
+using Microsoft.Extensions.Options;
 
 namespace GradingSystem.Worker.Services.Lab;
 
@@ -8,9 +10,10 @@ public class LabGradingPipeline(
     DockerComposeRunner docker,
     LabTestRunner testRunner,
     SourceAnalyzer sourceAnalyzer,
+    IOptions<WorkerOptions> opts,
     ILogger<LabGradingPipeline> logger)
 {
-    private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly SemaphoreSlim _gate = new(Math.Max(1, opts.Value.LabMaxConcurrentJobs), Math.Max(1, opts.Value.LabMaxConcurrentJobs));
 
     public async Task ProcessAsync(Guid jobId, CancellationToken ct)
     {
@@ -75,11 +78,13 @@ public class LabGradingPipeline(
             jobId, testCases.Count, sourceTests.Count, httpTests.Count);
 
         var allResults = new List<LabTestCaseResult>();
+        var dockerStarted = false;
+        string? workDir = null;
 
         try
         {
             // Phase 1: Extract archive — SOURCE checks need this, always runs first
-            var workDir = DockerComposeRunner.Extract(submission.FilePath, jobId);
+            workDir = DockerComposeRunner.Extract(submission.FilePath, jobId);
 
             // Phase 2: SOURCE checks — file-system only, no Docker needed
             foreach (var tc in sourceTests)
@@ -91,9 +96,17 @@ public class LabGradingPipeline(
             }
 
             // Phase 3: Docker + HTTP checks
-            var apiPort = await docker.StartContainersAsync(workDir, jobId, ct);
-            var httpResults = await testRunner.RunAsync(docker.GetApiBaseUrl(apiPort), jobId, httpTests, ct);
-            allResults.AddRange(httpResults);
+            if (httpTests.Count > 0)
+            {
+                dockerStarted = true;
+                var apiPort = await docker.StartContainersAsync(workDir, jobId, ct);
+                var httpResults = await testRunner.RunAsync(docker.GetApiBaseUrl(apiPort), jobId, httpTests, ct);
+                allResults.AddRange(httpResults);
+            }
+            else
+            {
+                logger.LogInformation("Job {JobId} has no HTTP test cases — skipping Docker startup", jobId);
+            }
 
             job.Status        = LabGradingJobStatus.Done;
             submission.Status = LabSubmissionStatus.Done;
@@ -131,8 +144,15 @@ public class LabGradingPipeline(
             uow.LabGradingJobs.Update(job);
             uow.LabSubmissions.Update(submission);
 
-            try { await docker.StopAsync(jobId); }
-            catch (Exception ex) { logger.LogError(ex, "Docker cleanup failed for job {JobId}", jobId); }
+            if (dockerStarted)
+            {
+                try { await docker.StopAsync(jobId); }
+                catch (Exception ex) { logger.LogError(ex, "Docker cleanup failed for job {JobId}", jobId); }
+            }
+            else if (workDir is not null)
+            {
+                TryDeleteWorkDir(workDir, jobId);
+            }
 
             try { await uow.SaveChangesAsync(CancellationToken.None); }
             catch (Exception ex) { logger.LogError(ex, "Final save failed for job {JobId}", jobId); }
@@ -146,6 +166,19 @@ public class LabGradingPipeline(
             {
                 logger.LogError(ex, "Status refresh failed for lab job {JobId}", jobId);
             }
+        }
+    }
+
+    private void TryDeleteWorkDir(string workDir, Guid jobId)
+    {
+        try
+        {
+            if (Directory.Exists(workDir))
+                Directory.Delete(workDir, recursive: true);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to delete lab workdir for job {JobId}: {Path}", jobId, workDir);
         }
     }
 

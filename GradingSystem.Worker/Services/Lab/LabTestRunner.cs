@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using GradingSystem.Domain.Entities;
 
@@ -9,6 +10,7 @@ public class LabTestRunner(IHttpClientFactory httpClientFactory, ILogger<LabTest
 {
     private static readonly JsonSerializerOptions _jsonOpts = new(JsonSerializerDefaults.Web);
     private static readonly Regex _variablePattern = new(@"\{\{(?<name>[^{}]+)\}\}", RegexOptions.Compiled);
+    private sealed record SendResult(int StatusCode, string Body, string? InputJson, string? ErrorMessage);
 
     public async Task<List<LabTestCaseResult>> RunAsync(
         string baseUrl, Guid jobId, IEnumerable<LabTestCase> testCases, CancellationToken ct)
@@ -75,22 +77,20 @@ public class LabTestRunner(IHttpClientFactory httpClientFactory, ILogger<LabTest
             }
         }
 
-        using var request = BuildRequest(method, url, resolvedInputJson, resolvedHeadersJson, includeAuthorization: true);
+        var sendResult = await SendWithEnrollmentRetryAsync(
+            client,
+            method,
+            url,
+            resolvedInputJson,
+            resolvedHeadersJson,
+            ct);
 
-        HttpResponseMessage? response = null;
-        string actualBody = string.Empty;
+        if (sendResult.ErrorMessage is not null)
+            return Fail(tc, jobId, url, sendResult.ErrorMessage);
 
-        try
-        {
-            response = await client.SendAsync(request, ct);
-            actualBody = await response.Content.ReadAsStringAsync(ct);
-        }
-        catch (Exception ex)
-        {
-            return Fail(tc, jobId, url, $"HTTP error: {ex.Message}");
-        }
-
-        var actualStatus = (int)response.StatusCode;
+        resolvedInputJson = sendResult.InputJson;
+        var actualBody = sendResult.Body;
+        var actualStatus = sendResult.StatusCode;
         bool statusPassed = actualStatus == tc.ExpectedStatusCode;
 
         bool bodyPassed = tc.MatchMode == LabTestCaseMatchMode.StatusOnly
@@ -113,6 +113,84 @@ public class LabTestRunner(IHttpClientFactory httpClientFactory, ILogger<LabTest
             ActualResponse  = TrimResponse(actualBody),
             ErrorMessage    = errorMessage,
         };
+    }
+
+    private static async Task<SendResult> SendWithEnrollmentRetryAsync(
+        HttpClient client,
+        HttpMethod method,
+        string url,
+        string? inputJson,
+        string? headersJson,
+        CancellationToken ct)
+    {
+        const int maxDuplicateRetries = 50;
+
+        for (var attempt = 0; attempt <= maxDuplicateRetries; attempt++)
+        {
+            using var request = BuildRequest(method, url, inputJson, headersJson, includeAuthorization: true);
+
+            try
+            {
+                using var response = await client.SendAsync(request, ct);
+                var body = await response.Content.ReadAsStringAsync(ct);
+                var statusCode = (int)response.StatusCode;
+
+                if (!ShouldRetryDuplicateEnrollment(method, url, statusCode, body, inputJson)
+                    || !TryIncrementEnrollmentCourseId(inputJson, out var nextInputJson))
+                {
+                    return new SendResult(statusCode, body, inputJson, null);
+                }
+
+                inputJson = nextInputJson;
+            }
+            catch (Exception ex)
+            {
+                return new SendResult(0, string.Empty, inputJson, $"HTTP error: {ex.Message}");
+            }
+        }
+
+        return new SendResult(0, string.Empty, inputJson, "Could not find a non-duplicate enrollment body after 50 retries.");
+    }
+
+    private static bool ShouldRetryDuplicateEnrollment(
+        HttpMethod method,
+        string url,
+        int statusCode,
+        string actualBody,
+        string? inputJson)
+    {
+        return method == HttpMethod.Post
+            && url.Contains("/enrollments", StringComparison.OrdinalIgnoreCase)
+            && statusCode == 400
+            && !string.IsNullOrWhiteSpace(inputJson)
+            && actualBody.Contains("already enrolled", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool TryIncrementEnrollmentCourseId(string? inputJson, out string? nextInputJson)
+    {
+        nextInputJson = inputJson;
+        if (string.IsNullOrWhiteSpace(inputJson)) return false;
+
+        try
+        {
+            var node = JsonNode.Parse(inputJson) as JsonObject;
+            if (node is null) return false;
+
+            var key = node.ContainsKey("courseId") ? "courseId" :
+                node.ContainsKey("CourseId") ? "CourseId" : null;
+            if (key is null) return false;
+
+            var current = node[key]?.GetValue<int>() ?? 0;
+            if (current <= 0) return false;
+
+            node[key] = current + 1;
+            nextInputJson = node.ToJsonString(_jsonOpts);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static HttpRequestMessage BuildRequest(

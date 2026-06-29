@@ -4,6 +4,7 @@ public class WorkerOptions
 {
     public int PollIntervalSeconds { get; set; } = 5;
     public int MaxConcurrentJobs { get; set; } = 3;
+    public int LabMaxConcurrentJobs { get; set; } = 1;
     public int ArtifactHealthCheckTimeoutSeconds { get; set; } = 15;
     public int ArtifactPortRangeStart { get; set; } = 7000;
     public int ArtifactPortRangeEnd { get; set; } = 7999;
@@ -16,7 +17,10 @@ public class WorkerOptions
     public int LabApiPortRangeEnd { get; set; } = 16000;
     public int LabDbPortRangeStart { get; set; } = 14000;
     public int LabDbPortRangeEnd { get; set; } = 14999;
-    public int LabDockerHealthCheckTimeoutSeconds { get; set; } = 120;
+    public int LabDockerHealthCheckTimeoutSeconds { get; set; } = 60;
+    public int LabDockerHealthCheckIntervalSeconds { get; set; } = 1;
+    public int LabDockerHealthCheckRequiredConsecutiveSuccesses { get; set; } = 2;
+    public string LabDockerHealthCheckPaths { get; set; } = "/health,/swagger/v1/swagger.json,/swagger,/";
 
     // Lab Docker timeouts and resource limits
     public int LabDockerBuildTimeoutSeconds { get; set; } = 300;   // 5 min for build + start
@@ -24,6 +28,10 @@ public class WorkerOptions
     public int LabDockerBuildCachePruneIntervalJobs { get; set; } = 5;
     public string LabDockerBuildCacheKeepStorage { get; set; } = "3GB";
     public int LabDockerBuildCacheFullPruneIntervalHours { get; set; } = 24;
+    public bool LabDockerRemoveImagesOnCleanup { get; set; } = false;
+    public int LabDockerSystemPruneIntervalHours { get; set; } = 6;
+    public double LabDockerSystemPruneReclaimableThresholdGb { get; set; } = 15;
+    public bool LabDockerSystemPruneVolumes { get; set; } = true;
     public string LabContainerMemoryLimit { get; set; } = "512m";
     public double LabContainerCpuLimit { get; set; } = 1.0;
 }

@@ -58,6 +58,7 @@ builder.Services.AddSingleton<SourceAnalyzer>();
 builder.Services.AddSingleton<LabGradingPipeline>();
 
 var workerOpts = builder.Configuration.GetSection("Worker").Get<WorkerOptions>() ?? new WorkerOptions();
+var labMaxConcurrentJobs = Math.Max(1, workerOpts.LabMaxConcurrentJobs);
 
 builder.Services.AddMassTransit(x =>
 {
@@ -67,11 +68,11 @@ builder.Services.AddMassTransit(x =>
     });
     x.AddConsumer<LabGradeJobConsumer>(c =>
     {
-        c.UseConcurrentMessageLimit(1);
+        c.UseConcurrentMessageLimit(labMaxConcurrentJobs);
     }).Endpoint(e =>
     {
-        e.PrefetchCount = 1;
-        e.ConcurrentMessageLimit = 1;
+        e.PrefetchCount = labMaxConcurrentJobs;
+        e.ConcurrentMessageLimit = labMaxConcurrentJobs;
     });
 
     x.UsingRabbitMq((ctx, cfg) =>
@@ -90,6 +91,7 @@ builder.Services.AddHostedService<GradingWorker>();
 builder.Services.AddHostedService<LabGradingWorker>();
 builder.Services.AddHostedService<StorageCleanupWorker>();
 builder.Services.AddHostedService<DockerBuildCacheCleanupWorker>();
+builder.Services.AddHostedService<DockerSystemCleanupWorker>();
 
 var host = builder.Build();
 

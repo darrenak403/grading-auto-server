@@ -84,6 +84,43 @@
     "matchMode": "Subset",
     "score": 1.0
   },
+    {
+    "httpMethod": "POST",
+    "urlTemplate": "/api/v1/auth/login",
+    "description": "POST login returns JWT access token and refresh token",
+    "saveTokenFrom": "$.data.accessToken;$.data.refreshToken",
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "inputJson": {
+      "username": "admin",
+      "password": "123456"
+    },
+    "expectJson": {
+      "success": true
+    },
+    "expectedStatusCode": 200,
+    "matchMode": "Subset",
+    "score": 1.5
+  },
+  {
+    "httpMethod": "POST",
+    "urlTemplate": "/api/v1/auth/refresh-token",
+    "description": "POST refresh token returns a new access token",
+    "saveTokenFrom": "$.data.accessToken",
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "inputJson": {
+      "refreshToken": "{{refreshToken}}"
+    },
+    "expectJson": {
+      "success": true
+    },
+    "expectedStatusCode": 200,
+    "matchMode": "Subset",
+    "score": 1.0
+  },
   {
     "httpMethod": "GET",
     "urlTemplate": "/api/v1/students?page=1&size=5",
@@ -187,3 +224,4 @@
     "score": 0.5
   }
 ]
+

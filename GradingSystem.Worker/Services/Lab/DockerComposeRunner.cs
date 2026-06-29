@@ -66,7 +66,7 @@ public partial class DockerComposeRunner(
 
         logger.LogInformation("Docker compose up for job {JobId} on API port {Port}", jobId, apiPort);
 
-        await WaitForApiAsync(apiPort, jobId, ct);
+        await WaitForApiAsync(apiPort, jobId, composeDir, serviceName, ct);
 
         return apiPort;
     }
@@ -316,16 +316,17 @@ public partial class DockerComposeRunner(
         var timeout = TimeSpan.FromSeconds(opts.Value.LabDockerDownTimeoutSeconds);
         var project = $"lab-{jobId}";
 
-        await RunCleanupCommandAsync(
-            jobId,
-            workingDirectory,
-            timeout,
-            "compose", "-p", project, "down", "--remove-orphans", "--volumes", "--rmi", "local");
+        string[] downArgs = opts.Value.LabDockerRemoveImagesOnCleanup
+            ? ["compose", "-p", project, "down", "--remove-orphans", "--volumes", "--rmi", "local"]
+            : ["compose", "-p", project, "down", "--remove-orphans", "--volumes"];
+
+        await RunCleanupCommandAsync(jobId, workingDirectory, timeout, downArgs);
 
         await RemoveResourcesByLabelAsync(jobId, "container", "ps", ["-aq", "--filter", $"label=com.docker.compose.project={project}"], ["rm", "-f"]);
         await RemoveResourcesByLabelAsync(jobId, "volume", "volume", ["ls", "-q", "--filter", $"label=com.docker.compose.project={project}"], ["volume", "rm", "-f"]);
         await RemoveResourcesByLabelAsync(jobId, "network", "network", ["ls", "-q", "--filter", $"label=com.docker.compose.project={project}"], ["network", "rm"]);
-        await RemoveResourcesByLabelAsync(jobId, "image", "image", ["ls", "-q", "--filter", $"label=com.docker.compose.project={project}"], ["image", "rm", "-f"]);
+        if (opts.Value.LabDockerRemoveImagesOnCleanup)
+            await RemoveResourcesByLabelAsync(jobId, "image", "image", ["ls", "-q", "--filter", $"label=com.docker.compose.project={project}"], ["image", "rm", "-f"]);
 
         if (removeWorkDir)
             await PruneBuildCacheIfDueAsync(jobId, ct);
@@ -481,30 +482,121 @@ public partial class DockerComposeRunner(
             : output[^MaxDockerOutputChars..];
     }
 
-    private async Task WaitForApiAsync(int port, Guid jobId, CancellationToken ct)
+    private async Task WaitForApiAsync(int port, Guid jobId, string composeDir, string serviceName, CancellationToken ct)
     {
         using var probe = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
         var baseUrl = GetApiBaseUrl(port);
         var deadline = DateTime.UtcNow.AddSeconds(opts.Value.LabDockerHealthCheckTimeoutSeconds);
+        var intervalSeconds = Math.Max(1, opts.Value.LabDockerHealthCheckIntervalSeconds);
+        var requiredSuccesses = Math.Max(1, opts.Value.LabDockerHealthCheckRequiredConsecutiveSuccesses);
+        var successfulProbes = 0;
+        var healthPaths = GetHealthCheckPaths();
 
         while (DateTime.UtcNow < deadline)
         {
             ct.ThrowIfCancellationRequested();
+
+            var serviceStatus = await GetComposeServiceStatusAsync(composeDir, jobId, serviceName, ct);
+            if (serviceStatus.IsExited)
+            {
+                var logs = await GetLogsAsync(jobId);
+                throw new DockerComposeException(
+                    $"Student API service '{serviceName}' exited before becoming ready. " +
+                    $"docker compose ps: {serviceStatus.Output}. Logs: {logs}");
+            }
+
             try
             {
-                await probe.GetAsync(baseUrl, ct);
-                logger.LogInformation("Student API on port {Port} is ready (job {JobId})", port, jobId);
-                return;
+                var probeResult = await ProbeAnyHealthPathAsync(probe, baseUrl, healthPaths, ct);
+                successfulProbes++;
+                if (successfulProbes >= requiredSuccesses)
+                {
+                    logger.LogInformation(
+                        "Student API on port {Port} is ready after {Successes} successful probe(s), last path {Path} returned {Status} (job {JobId})",
+                        port, successfulProbes, probeResult.Path, probeResult.StatusCode, jobId);
+                    return;
+                }
             }
             catch (Exception ex) when (ex is HttpRequestException
                                     || (ex is TaskCanceledException && !ct.IsCancellationRequested))
             {
-                await Task.Delay(3000, ct);
+                successfulProbes = 0;
+                await Task.Delay(TimeSpan.FromSeconds(intervalSeconds), ct);
             }
         }
 
         throw new DockerComposeTimeoutException(
             $"Student API on port {port} did not respond within {opts.Value.LabDockerHealthCheckTimeoutSeconds}s.");
+    }
+
+    private IReadOnlyList<string> GetHealthCheckPaths()
+    {
+        var paths = opts.Value.LabDockerHealthCheckPaths
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(p => p.StartsWith('/') ? p : "/" + p)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        return paths.Count > 0 ? paths : ["/"];
+    }
+
+    private static async Task<HealthProbeResult> ProbeAnyHealthPathAsync(
+        HttpClient probe,
+        string baseUrl,
+        IReadOnlyList<string> paths,
+        CancellationToken ct)
+    {
+        Exception? lastError = null;
+        foreach (var path in paths)
+        {
+            try
+            {
+                using var response = await probe.GetAsync(baseUrl.TrimEnd('/') + path, ct);
+                return new HealthProbeResult(path, (int)response.StatusCode);
+            }
+            catch (Exception ex) when (ex is HttpRequestException
+                                    || (ex is TaskCanceledException && !ct.IsCancellationRequested))
+            {
+                lastError = ex;
+            }
+        }
+
+        throw lastError ?? new HttpRequestException("No health check paths configured.");
+    }
+
+    private async Task<ServiceStatus> GetComposeServiceStatusAsync(
+        string composeDir,
+        Guid jobId,
+        string serviceName,
+        CancellationToken ct)
+    {
+        try
+        {
+            var result = await RunDockerAsync(composeDir, ct,
+                ["compose", "-p", $"lab-{jobId}", "ps", serviceName, "--format", "json"]);
+            if (result.ExitCode != 0)
+                return new ServiceStatus(false, result.Output);
+
+            var output = result.Output.Trim();
+            if (string.IsNullOrWhiteSpace(output))
+                return new ServiceStatus(false, "(no service status output)");
+
+            var isExited = output.Contains("\"State\":\"exited\"", StringComparison.OrdinalIgnoreCase)
+                || output.Contains("\"State\":\"dead\"", StringComparison.OrdinalIgnoreCase)
+                || (output.Contains("\"ExitCode\":", StringComparison.OrdinalIgnoreCase)
+                    && !output.Contains("\"ExitCode\":0", StringComparison.OrdinalIgnoreCase));
+
+            return new ServiceStatus(isExited, output);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogDebug(ex, "Could not inspect Docker service status for job {JobId}", jobId);
+            return new ServiceStatus(false, ex.Message);
+        }
     }
 
     private static int PickPort(int start, int end)
@@ -626,4 +718,6 @@ public partial class DockerComposeRunner(
     }
 
     private sealed record DockerCommandResult(int ExitCode, string Output);
+    private sealed record ServiceStatus(bool IsExited, string Output);
+    private sealed record HealthProbeResult(string Path, int StatusCode);
 }

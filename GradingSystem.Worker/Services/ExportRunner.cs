@@ -180,8 +180,9 @@ public partial class ExportRunner(
 
         var resultsByJobAndTestCase = allResults.ToDictionary(r => (r.LabGradingJobId, r.LabTestCaseId));
         var maxScore = testCases.Sum(t => t.Score);
+        var loginCredentials = ExtractLabLoginCredentials(testCases);
 
-        var columns = new List<string> { "Tên", "MSSV" };
+        var columns = new List<string> { "Tên", "MSSV", "Login Username", "Login Password" };
         foreach (var tc in testCases)
             columns.Add(LabTestCaseLabel(tc));
         columns.Add("Grand Total");
@@ -194,6 +195,8 @@ public partial class ExportRunner(
             {
                 sub.StudentCode.Length > 9 ? sub.StudentCode[..^9] : sub.StudentCode,
                 StudentCode.ParseId(sub.StudentCode),
+                loginCredentials.Username,
+                loginCredentials.Password,
             };
 
             decimal grandTotal = 0;
@@ -221,7 +224,7 @@ public partial class ExportRunner(
         var sheetName = UniqueSheetName(pkg, assignment.Title);
         var ws = WriteSheet(pkg, sheetName, columns, rows);
 
-        for (var c = 3; c < 3 + testCases.Count; c++)
+        for (var c = 5; c < 5 + testCases.Count; c++)
         {
             ws.Column(c).Width = 35;
             ws.Column(c).Style.WrapText = true;
@@ -229,11 +232,11 @@ public partial class ExportRunner(
 
         if (rows.Count > 0 && testCases.Count > 0)
         {
-            ws.Cells[2, 3, rows.Count + 1, 2 + testCases.Count].Style.VerticalAlignment =
+            ws.Cells[2, 5, rows.Count + 1, 4 + testCases.Count].Style.VerticalAlignment =
                 OfficeOpenXml.Style.ExcelVerticalAlignment.Top;
         }
 
-        ApplyLabTestCaseScoreStyles(ws, submissions, testCases, latestJobBySubmission, resultsByJobAndTestCase);
+        ApplyLabTestCaseScoreStyles(ws, submissions, testCases, latestJobBySubmission, resultsByJobAndTestCase, firstTestCaseColumn: 5);
     }
 
     private static ExcelWorksheet WriteSheet(
@@ -261,6 +264,48 @@ public partial class ExportRunner(
         return $"{tc.HttpMethod} {tc.UrlTemplate}";
     }
 
+    private static LabLoginCredentials ExtractLabLoginCredentials(IReadOnlyList<LabTestCase> testCases)
+    {
+        var loginCase = testCases.FirstOrDefault(IsLoginTestCase);
+
+        if (loginCase?.InputJson is null)
+            return new LabLoginCredentials(string.Empty, string.Empty);
+
+        return ExtractLoginCredentials(loginCase.InputJson);
+    }
+
+    private static bool IsLoginTestCase(LabTestCase tc) =>
+        tc.HttpMethod.Equals("POST", StringComparison.OrdinalIgnoreCase)
+        && tc.UrlTemplate.Contains("/auth/login", StringComparison.OrdinalIgnoreCase)
+        && !string.IsNullOrWhiteSpace(tc.InputJson);
+
+    private static LabLoginCredentials ExtractLoginCredentials(string? inputJson)
+    {
+        if (string.IsNullOrWhiteSpace(inputJson))
+            return new LabLoginCredentials(string.Empty, string.Empty);
+
+        try
+        {
+            using var doc = JsonDocument.Parse(inputJson);
+            var root = doc.RootElement;
+            var username = TryGetStringProperty(root, "username") ?? TryGetStringProperty(root, "userName") ?? string.Empty;
+            var password = TryGetStringProperty(root, "password") ?? string.Empty;
+            return new LabLoginCredentials(username, password);
+        }
+        catch
+        {
+            return new LabLoginCredentials(string.Empty, string.Empty);
+        }
+    }
+
+    private static string? TryGetStringProperty(JsonElement root, string propertyName)
+    {
+        if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty(propertyName, out var value))
+            return null;
+
+        return value.ValueKind == JsonValueKind.String ? value.GetString() : value.ToString();
+    }
+
     private static string FormatLabTestCaseCell(decimal score, LabTestCase tc, LabTestCaseResult result)
     {
         var lines = new List<string> { $"Điểm: {score}" };
@@ -268,6 +313,15 @@ public partial class ExportRunner(
         lines.Add(tc.HttpMethod.Equals("SOURCE", StringComparison.OrdinalIgnoreCase)
             ? $"Rule: {tc.UrlTemplate}"
             : $"Endpoint: {tc.HttpMethod} {tc.UrlTemplate}");
+
+        if (IsLoginTestCase(tc))
+        {
+            var credentials = ExtractLoginCredentials(tc.InputJson);
+            if (!string.IsNullOrWhiteSpace(credentials.Username))
+                lines.Add($"Username: {credentials.Username}");
+            if (!string.IsNullOrWhiteSpace(credentials.Password))
+                lines.Add($"Password: {credentials.Password}");
+        }
 
         if (result.ActualStatusCode.HasValue)
             lines.Add($"Status: {result.ActualStatusCode}");
@@ -298,7 +352,8 @@ public partial class ExportRunner(
         IReadOnlyList<LabSubmission> submissions,
         IReadOnlyList<LabTestCase> testCases,
         IReadOnlyDictionary<Guid, LabGradingJob> latestJobBySubmission,
-        IReadOnlyDictionary<(Guid LabGradingJobId, Guid LabTestCaseId), LabTestCaseResult> resultsByJobAndTestCase)
+        IReadOnlyDictionary<(Guid LabGradingJobId, Guid LabTestCaseId), LabTestCaseResult> resultsByJobAndTestCase,
+        int firstTestCaseColumn = 3)
     {
         for (var rowIndex = 0; rowIndex < submissions.Count; rowIndex++)
         {
@@ -313,7 +368,7 @@ public partial class ExportRunner(
                     continue;
 
                 var score = result.ManualOverrideScore ?? result.AwardedScore;
-                var cell = ws.Cells[rowIndex + 2, testCaseIndex + 3];
+                var cell = ws.Cells[rowIndex + 2, testCaseIndex + firstTestCaseColumn];
                 cell.Style.Fill.PatternType = OfficeOpenXml.Style.ExcelFillStyle.Solid;
 
                 if (score >= testCase.Score)
@@ -329,6 +384,8 @@ public partial class ExportRunner(
             }
         }
     }
+
+    private sealed record LabLoginCredentials(string Username, string Password);
 
     [GeneratedRegex(@"[:\\/?*\[\]]")]
     private static partial Regex InvalidSheetNameCharsRegex();
