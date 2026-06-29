@@ -27,14 +27,24 @@ public class ExportService(IUnitOfWork uow, IConfiguration config) : IExportServ
     }
 
     public async Task<ExportJobDto> CreateSessionExportAsync(
-        Guid sessionId, string? gradingRound, CancellationToken ct = default)
+        Guid sessionId, string? gradingRound, Guid? assignmentId = null, CancellationToken ct = default)
     {
         var session = await uow.ExamSessions.GetByIdAsync(sessionId)
             ?? throw new NotFoundException($"ExamSession '{sessionId}' not found.");
 
+        string? assignmentCode = null;
+        if (assignmentId.HasValue)
+        {
+            var assignment = await uow.Assignments.GetByIdAsync(assignmentId.Value);
+            if (assignment is null || assignment.ExamSessionId != sessionId)
+                throw new NotFoundException($"Assignment '{assignmentId}' not found in session '{sessionId}'.");
+            assignmentCode = assignment.Code;
+        }
+
         var job = new ExportJob
         {
             ExamSessionId = sessionId,
+            AssignmentId  = assignmentId,
             GradingRound  = gradingRound?.Trim(),
             Status        = ExportStatus.Pending,
         };
@@ -42,7 +52,7 @@ public class ExportService(IUnitOfWork uow, IConfiguration config) : IExportServ
         await uow.ExportJobs.AddAsync(job);
         await uow.SaveChangesAsync(ct);
 
-        return Map(job, assignmentCode: null, examSessionTitle: session.Title, labAssignmentTitle: null);
+        return Map(job, assignmentCode, examSessionTitle: session.Title, labAssignmentTitle: null);
     }
 
     public async Task<ExportJobDto> CreateLabExportAsync(Guid labAssignmentId, CancellationToken ct = default)
@@ -71,15 +81,20 @@ public class ExportService(IUnitOfWork uow, IConfiguration config) : IExportServ
         string? sessionTitle = null;
         string? labAssignmentTitle = null;
 
-        if (job.AssignmentId.HasValue)
-        {
-            var a = await uow.Assignments.GetByIdAsync(job.AssignmentId.Value);
-            assignmentCode = a?.Code;
-        }
-        else if (job.ExamSessionId.HasValue)
+        if (job.ExamSessionId.HasValue)
         {
             var s = await uow.ExamSessions.GetByIdAsync(job.ExamSessionId.Value);
             sessionTitle = s?.Title;
+            if (job.AssignmentId.HasValue)
+            {
+                var a = await uow.Assignments.GetByIdAsync(job.AssignmentId.Value);
+                assignmentCode = a?.Code;
+            }
+        }
+        else if (job.AssignmentId.HasValue)
+        {
+            var a = await uow.Assignments.GetByIdAsync(job.AssignmentId.Value);
+            assignmentCode = a?.Code;
         }
         else if (job.LabAssignmentId.HasValue)
         {

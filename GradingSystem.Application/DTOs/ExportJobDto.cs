@@ -28,6 +28,7 @@ public class CreateExportRequest
 public class CreateSessionExportRequest
 {
     public string? GradingRound { get; set; }
+    public Guid? AssignmentId { get; set; }
 }
 
 public class CreateLabExportRequest;

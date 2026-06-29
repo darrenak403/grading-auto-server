@@ -10,7 +10,7 @@ public interface IBulkUploadService
         Stream masterZipStream,
         CancellationToken ct = default);
 
-    /// <summary>Always targets the assignment's latest existing round, creating "Lần 1" if none exists yet.</summary>
+    /// <summary>Always targets the assignment's latest existing round, creating "Round 1" if none exists yet.</summary>
     Task<BulkUploadResultDto> ParseAndCreateForLatestRoundAsync(
         Guid assignmentId,
         Stream masterZipStream,

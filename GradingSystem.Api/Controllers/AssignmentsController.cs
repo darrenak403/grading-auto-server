@@ -130,9 +130,10 @@ public class AssignmentsController(IAssignmentService assignmentService, IBulkUp
     }
 
     [HttpPost("assignments/{id:guid}/grade")]
-    public async Task<IActionResult> TriggerGradeAsync(Guid id, CancellationToken ct = default)
+    public async Task<IActionResult> TriggerGradeAsync(
+        Guid id, [FromQuery] string? gradingRound, CancellationToken ct = default)
     {
-        var count = await assignmentService.TriggerGradeAsync(id, ct);
+        var count = await assignmentService.TriggerGradeAsync(id, gradingRound, ct);
         return Ok(count, $"Enqueued {count} grading job(s).");
     }
 }

@@ -25,7 +25,7 @@ public class SubmissionServiceTests
         StudentCode = "se181951",
         ArtifactZipPath = hasArtifact ? "/storage/submissions/x/artifact.zip" : string.Empty,
         HasArtifact = hasArtifact,
-        GradingRound = "Lần 1",
+        GradingRound = "Round 1",
         Status = SubmissionStatus.Done,
     };
 
@@ -191,25 +191,25 @@ public class SubmissionServiceTests
         var sub1 = new Submission
         {
             Id = Guid.NewGuid(), AssignmentId = assignmentId, StudentCode = "se1",
-            GradingRound = "Lần 1", ArtifactZipPath = "x", Status = SubmissionStatus.Done,
+            GradingRound = "Round 1", ArtifactZipPath = "x", Status = SubmissionStatus.Done,
         };
         var sub2 = new Submission
         {
             Id = Guid.NewGuid(), AssignmentId = assignmentId, StudentCode = "se1",
-            GradingRound = "Lần 2", ArtifactZipPath = "x", Status = SubmissionStatus.Done,
+            GradingRound = "Round 2", ArtifactZipPath = "x", Status = SubmissionStatus.Done,
         };
         uow.AssignmentsRepo.Items.Add(new Assignment { Id = assignmentId, Title = "A", Code = "A1" });
         uow.SubmissionsRepo.Items.Add(sub1);
         uow.SubmissionsRepo.Items.Add(sub2);
 
-        var round1Results = await svc.GetByAssignmentIdAsync(assignmentId, null, "Lần 1");
-        var round2Results = await svc.GetByAssignmentIdAsync(assignmentId, null, "Lần 2");
+        var round1Results = await svc.GetByAssignmentIdAsync(assignmentId, null, "Round 1");
+        var round2Results = await svc.GetByAssignmentIdAsync(assignmentId, null, "Round 2");
         var allResults = await svc.GetByAssignmentIdAsync(assignmentId, null, null);
 
         Assert.Single(round1Results);
-        Assert.Equal("Lần 1", round1Results[0].GradingRound);
+        Assert.Equal("Round 1", round1Results[0].GradingRound);
         Assert.Single(round2Results);
-        Assert.Equal("Lần 2", round2Results[0].GradingRound);
+        Assert.Equal("Round 2", round2Results[0].GradingRound);
         Assert.Equal(2, allResults.Count);
     }
 }

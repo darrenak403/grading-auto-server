@@ -39,11 +39,18 @@ public partial class ExportRunner(
     private async Task BuildSessionSheetsAsync(
         ExcelPackage pkg, ExportJob job, IUnitOfWork uow, CancellationToken ct)
     {
-        var assignments = (await uow.Assignments.FindAsync(a => a.ExamSessionId == job.ExamSessionId))
+        var allAssignments = (await uow.Assignments.FindAsync(a => a.ExamSessionId == job.ExamSessionId))
             .OrderBy(a => a.Code).ToList();
+        var assignments = job.AssignmentId.HasValue
+            ? allAssignments.Where(a => a.Id == job.AssignmentId.Value).ToList()
+            : allAssignments;
 
         if (assignments.Count == 0)
         {
+            if (job.AssignmentId.HasValue)
+                logger.LogWarning(
+                    "Export job {JobId} filtered to Assignment {AssignmentId} but it no longer belongs to ExamSession {ExamSessionId}",
+                    job.Id, job.AssignmentId, job.ExamSessionId);
             pkg.Workbook.Worksheets.Add(UniqueSheetName(pkg, "No data"));
             return;
         }
@@ -79,6 +86,13 @@ public partial class ExportRunner(
 
         var submissionIds = submissions.Select(s => s.Id).ToHashSet();
 
+        var participantIds = submissions.Where(s => s.ParticipantId.HasValue)
+            .Select(s => s.ParticipantId!.Value).ToHashSet();
+        var participantsById = participantIds.Count == 0
+            ? new Dictionary<Guid, Participant>()
+            : (await uow.Participants.FindAsync(p => participantIds.Contains(p.Id)))
+                .ToDictionary(p => p.Id);
+
         var allGradingJobs = (await uow.GradingJobs.FindAsync(
             j => submissionIds.Contains(j.SubmissionId) && j.Status == JobStatus.Done)).ToList();
 
@@ -107,12 +121,13 @@ public partial class ExportRunner(
         columns.Add("Notes");
 
         var rows = new List<List<object>>();
-        foreach (var sub in submissions.OrderBy(s => StudentCode.ParseId(s.StudentCode)))
+        foreach (var sub in submissions.OrderBy(s => s.StudentCode))
         {
+            participantsById.TryGetValue(sub.ParticipantId ?? Guid.Empty, out var participant);
             var row = new List<object>
             {
-                sub.StudentCode.Length > 9 ? sub.StudentCode[..^9] : sub.StudentCode,
-                StudentCode.ParseId(sub.StudentCode),
+                participant?.Username ?? sub.StudentCode,
+                participant?.StudentCode ?? sub.StudentCode,
             };
 
             decimal grandTotal = 0;

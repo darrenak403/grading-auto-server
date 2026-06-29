@@ -4,7 +4,9 @@ namespace GradingSystem.Application.Common;
 
 public static partial class GradingRoundHelper
 {
-    [GeneratedRegex(@"^Lần (\d+)$")]
+    // Accepts both the current "Round N" label and the legacy "Lần N" label so
+    // rounds created before the rename still parse/sort correctly.
+    [GeneratedRegex(@"^(?:Round|Lần) (\d+)$")]
     private static partial Regex RoundLabelRegex();
 
     public static int? ParseRoundNumber(string label)
@@ -21,14 +23,14 @@ public static partial class GradingRoundHelper
             .Select(n => n!.Value)
             .DefaultIfEmpty(0)
             .Max();
-        return $"Lần {maxNumber + 1}";
+        return $"Round {maxNumber + 1}";
     }
 
     public static string LatestRoundLabel(IEnumerable<string> existingRounds)
     {
         var rounds = existingRounds.ToList();
         if (rounds.Count == 0)
-            return "Lần 1";
+            return "Round 1";
 
         var withNumbers = rounds
             .Select(r => (Label: r, Number: ParseRoundNumber(r)))

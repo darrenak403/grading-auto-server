@@ -37,11 +37,11 @@ public class ExamSessionServiceTests
 
         uow.SubmissionsRepo.Items.Add(new Submission
         {
-            AssignmentId = assignmentId, StudentCode = "se1", GradingRound = "Lần 1", ArtifactZipPath = "x",
+            AssignmentId = assignmentId, StudentCode = "se1", GradingRound = "Round 1", ArtifactZipPath = "x",
         });
         uow.SubmissionsRepo.Items.Add(new Submission
         {
-            AssignmentId = assignmentId, StudentCode = "se1", GradingRound = "Lần 2", ArtifactZipPath = "x",
+            AssignmentId = assignmentId, StudentCode = "se1", GradingRound = "Round 2", ArtifactZipPath = "x",
         });
 
         await Assert.ThrowsAsync<BadRequestException>(() => svc.GetSessionResultsAsync(sessionId, null));
@@ -55,12 +55,12 @@ public class ExamSessionServiceTests
 
         uow.SubmissionsRepo.Items.Add(new Submission
         {
-            AssignmentId = assignmentId, StudentCode = "se1", GradingRound = "Lần 1", ArtifactZipPath = "x",
+            AssignmentId = assignmentId, StudentCode = "se1", GradingRound = "Round 1", ArtifactZipPath = "x",
         });
 
         var results = await svc.GetSessionResultsAsync(sessionId, null);
         Assert.Single(results);
-        Assert.Equal("Lần 1", results[0].GradingRound);
+        Assert.Equal("Round 1", results[0].GradingRound);
     }
 
     [Fact]
@@ -71,23 +71,23 @@ public class ExamSessionServiceTests
 
         uow.SubmissionsRepo.Items.Add(new Submission
         {
-            AssignmentId = assignmentId, StudentCode = "se1", GradingRound = "Lần 1", ArtifactZipPath = "x",
+            AssignmentId = assignmentId, StudentCode = "se1", GradingRound = "Round 1", ArtifactZipPath = "x",
         });
         uow.SubmissionsRepo.Items.Add(new Submission
         {
-            AssignmentId = assignmentId, StudentCode = "se2", GradingRound = "Lần 2", ArtifactZipPath = "x",
+            AssignmentId = assignmentId, StudentCode = "se2", GradingRound = "Round 2", ArtifactZipPath = "x",
         });
 
-        var resultsRound1 = await svc.GetSessionResultsAsync(sessionId, "Lần 1");
-        var resultsRound2 = await svc.GetSessionResultsAsync(sessionId, "Lần 2");
+        var resultsRound1 = await svc.GetSessionResultsAsync(sessionId, "Round 1");
+        var resultsRound2 = await svc.GetSessionResultsAsync(sessionId, "Round 2");
 
         Assert.Single(resultsRound1);
         Assert.Equal("se1", resultsRound1[0].StudentCode);
-        Assert.Equal("Lần 1", resultsRound1[0].GradingRound);
+        Assert.Equal("Round 1", resultsRound1[0].GradingRound);
 
         Assert.Single(resultsRound2);
         Assert.Equal("se2", resultsRound2[0].StudentCode);
-        Assert.Equal("Lần 2", resultsRound2[0].GradingRound);
+        Assert.Equal("Round 2", resultsRound2[0].GradingRound);
     }
 
     [Fact]
@@ -118,7 +118,7 @@ public class ExamSessionServiceTests
 
         var submission = new Submission
         {
-            AssignmentId = assignmentId, StudentCode = "se1", GradingRound = "Lần 1", ArtifactZipPath = "x",
+            AssignmentId = assignmentId, StudentCode = "se1", GradingRound = "Round 1", ArtifactZipPath = "x",
         };
         uow.SubmissionsRepo.Items.Add(submission);
 

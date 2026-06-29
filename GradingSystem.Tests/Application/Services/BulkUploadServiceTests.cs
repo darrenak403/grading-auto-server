@@ -67,7 +67,7 @@ public class BulkUploadServiceTests : IDisposable
         await svc.ParseAndCreateForLatestRoundAsync(assignmentId, zip);
 
         var submission = uow.SubmissionsRepo.Items.Single(s => s.ParticipantId == participantId);
-        Assert.Equal("Lần 1", submission.GradingRound);
+        Assert.Equal("Round 1", submission.GradingRound);
     }
 
     [Fact]
@@ -84,23 +84,23 @@ public class BulkUploadServiceTests : IDisposable
             Username = "stud1", StudentCode = "se1",
         });
 
-        // Seed existing rounds "Lần 1" and "Lần 2" so latest round should be "Lần 2".
+        // Seed existing rounds "Round 1" and "Round 2" so latest round should be "Round 2".
         uow.SubmissionsRepo.Items.Add(new Submission
         {
             AssignmentId = assignmentId, ParticipantId = Guid.NewGuid(), StudentCode = "other",
-            GradingRound = "Lần 1", ArtifactZipPath = "x",
+            GradingRound = "Round 1", ArtifactZipPath = "x",
         });
         uow.SubmissionsRepo.Items.Add(new Submission
         {
             AssignmentId = assignmentId, ParticipantId = Guid.NewGuid(), StudentCode = "other2",
-            GradingRound = "Lần 2", ArtifactZipPath = "x",
+            GradingRound = "Round 2", ArtifactZipPath = "x",
         });
 
         using var zip = EmptyZip();
         await svc.ParseAndCreateForLatestRoundAsync(assignmentId, zip);
 
         var submission = uow.SubmissionsRepo.Items.Single(s => s.ParticipantId == participantId);
-        Assert.Equal("Lần 2", submission.GradingRound);
+        Assert.Equal("Round 2", submission.GradingRound);
     }
 
     [Fact]
@@ -121,7 +121,7 @@ public class BulkUploadServiceTests : IDisposable
         await svc.CreateNewRoundAsync(assignmentId, zip);
 
         var submission = uow.SubmissionsRepo.Items.Single(s => s.ParticipantId == participantId);
-        Assert.Equal("Lần 1", submission.GradingRound);
+        Assert.Equal("Round 1", submission.GradingRound);
     }
 
     [Fact]
@@ -141,19 +141,19 @@ public class BulkUploadServiceTests : IDisposable
         uow.SubmissionsRepo.Items.Add(new Submission
         {
             AssignmentId = assignmentId, ParticipantId = Guid.NewGuid(), StudentCode = "other",
-            GradingRound = "Lần 1", ArtifactZipPath = "x",
+            GradingRound = "Round 1", ArtifactZipPath = "x",
         });
         uow.SubmissionsRepo.Items.Add(new Submission
         {
             AssignmentId = assignmentId, ParticipantId = Guid.NewGuid(), StudentCode = "other2",
-            GradingRound = "Lần 3", ArtifactZipPath = "x",
+            GradingRound = "Round 3", ArtifactZipPath = "x",
         });
 
         using var zip = EmptyZip();
         await svc.CreateNewRoundAsync(assignmentId, zip);
 
         var submission = uow.SubmissionsRepo.Items.Single(s => s.ParticipantId == participantId);
-        Assert.Equal("Lần 4", submission.GradingRound);
+        Assert.Equal("Round 4", submission.GradingRound);
     }
 
     [Fact]
@@ -170,7 +170,7 @@ public class BulkUploadServiceTests : IDisposable
         var (svc, _) = CreateSut();
         using var zip = EmptyZip();
         await Assert.ThrowsAsync<NotFoundException>(
-            () => svc.ParseAndCreateAsync(Guid.NewGuid(), "Lần 1", zip));
+            () => svc.ParseAndCreateAsync(Guid.NewGuid(), "Round 1", zip));
     }
 
     [Fact]
@@ -188,7 +188,7 @@ public class BulkUploadServiceTests : IDisposable
         });
 
         using var zip = EmptyZip();
-        var result = await svc.ParseAndCreateAsync(assignmentId, "Lần 1", zip);
+        var result = await svc.ParseAndCreateAsync(assignmentId, "Round 1", zip);
 
         Assert.Equal(0, result.Created);
         Assert.Equal(1, result.Missing);
@@ -196,6 +196,6 @@ public class BulkUploadServiceTests : IDisposable
         var submission = uow.SubmissionsRepo.Items.Single(s => s.ParticipantId == participantId);
         Assert.False(submission.HasArtifact);
         Assert.Equal(SubmissionStatus.Done, submission.Status);
-        Assert.Equal("Lần 1", submission.GradingRound);
+        Assert.Equal("Round 1", submission.GradingRound);
     }
 }
