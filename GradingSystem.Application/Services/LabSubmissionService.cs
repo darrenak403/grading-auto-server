@@ -36,6 +36,7 @@ public class LabSubmissionService(IUnitOfWork uow, IConfiguration config) : ILab
         var warnings = new List<string>();
         var seenCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var savedPaths = new List<string>();
+        var oldFilesToDelete = new List<string>();
 
         try
         {
@@ -63,23 +64,66 @@ public class LabSubmissionService(IUnitOfWork uow, IConfiguration config) : ILab
             // Guard against path traversal after combining
             if (!Path.GetFullPath(savePath).StartsWith(Path.GetFullPath(dir) + Path.DirectorySeparatorChar, StringComparison.Ordinal))
                 throw new BadRequestException($"Invalid filename '{file.FileName}'.");
-            using (var fs = new FileStream(savePath, FileMode.Create))
-                await file.Content.CopyToAsync(fs, ct);
-            savedPaths.Add(savePath);
 
-            var submission = new LabSubmission
+            var existingList = await uow.LabSubmissions.FindAsync(s => s.LabAssignmentId == assignmentId && s.StudentCode == studentCode);
+            var existing = existingList.FirstOrDefault();
+
+            if (existing != null)
             {
-                LabAssignmentId = assignmentId,
-                StudentCode = studentCode,
-                OriginalFileName = file.FileName,
-                FilePath = savePath
-            };
-            await uow.LabSubmissions.AddAsync(submission);
-            created.Add(Map(submission));
+                if (existing.FilePath != savePath && File.Exists(existing.FilePath))
+                {
+                    oldFilesToDelete.Add(existing.FilePath);
+                }
+
+                // Delete old grading jobs (and test results via cascade delete)
+                var oldJobs = await uow.LabGradingJobs.FindAsync(j => j.LabSubmissionId == existing.Id);
+                foreach (var job in oldJobs)
+                {
+                    uow.LabGradingJobs.Remove(job);
+                }
+
+                using (var fs = new FileStream(savePath, FileMode.Create))
+                    await file.Content.CopyToAsync(fs, ct);
+                savedPaths.Add(savePath);
+
+                existing.OriginalFileName = file.FileName;
+                existing.FilePath = savePath;
+                existing.Status = LabSubmissionStatus.Pending;
+
+                uow.LabSubmissions.Update(existing);
+                created.Add(Map(existing));
+            }
+            else
+            {
+                using (var fs = new FileStream(savePath, FileMode.Create))
+                    await file.Content.CopyToAsync(fs, ct);
+                savedPaths.Add(savePath);
+
+                var submission = new LabSubmission
+                {
+                    LabAssignmentId = assignmentId,
+                    StudentCode = studentCode,
+                    OriginalFileName = file.FileName,
+                    FilePath = savePath,
+                    Status = LabSubmissionStatus.Pending
+                };
+                await uow.LabSubmissions.AddAsync(submission);
+                created.Add(Map(submission));
+            }
         }
 
         if (created.Count > 0)
+        {
             await uow.SaveChangesAsync(ct);
+            // Clean up old files only after DB save succeeds
+            foreach (var oldPath in oldFilesToDelete)
+            {
+                if (File.Exists(oldPath))
+                {
+                    try { File.Delete(oldPath); } catch { /* Ignore file delete errors on clean up */ }
+                }
+            }
+        }
         }
         catch
         {

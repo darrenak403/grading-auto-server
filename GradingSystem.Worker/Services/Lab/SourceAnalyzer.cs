@@ -10,10 +10,15 @@ namespace GradingSystem.Worker.Services.Lab;
 /// Supported rules:
 ///   project-name:PRN232.*.API          — at least one .csproj matches glob
 ///   project-count:3                    — exactly N .csproj files exist
+///   project-count-at-least:4           — at least N .csproj files exist
 ///   folder-exists:**/Controllers        — at least one folder matches glob
 ///   file-exists:**/docker-compose.yml  — at least one file matches glob
+///   file-count-at-least:**/*.proto:1   — at least N files match glob
 ///   file-contains:**/Services/*.cs:IRepository     — at least one file contains text
+///   file-contains-any:**/*.cs:AddReverseProxy|AddOcelot — at least one file contains any option
 ///   file-not-contains:**/Controllers/*.cs:DbContext — no file contains text
+///   compose-service-exists:api-gateway — docker-compose.yml defines this service
+///   compose-service-count-at-least:7   — docker-compose.yml defines at least N services
 /// </summary>
 public class SourceAnalyzer
 {
@@ -33,10 +38,15 @@ public class SourceAnalyzer
             {
                 "project-name"       => CheckProjectName(workDir, ruleArgs),
                 "project-count"      => CheckProjectCount(workDir, ruleArgs),
+                "project-count-at-least" => CheckProjectCountAtLeast(workDir, ruleArgs),
                 "folder-exists"      => CheckFolderExists(workDir, ruleArgs),
                 "file-exists"        => CheckFileExists(workDir, ruleArgs),
+                "file-count-at-least" => CheckFileCountAtLeast(workDir, ruleArgs),
                 "file-contains"      => CheckFilePattern(workDir, ruleArgs, mustContain: true),
+                "file-contains-any"  => CheckFileContainsAny(workDir, ruleArgs),
                 "file-not-contains"  => CheckFilePattern(workDir, ruleArgs, mustContain: false),
+                "compose-service-exists" => CheckComposeServiceExists(workDir, ruleArgs),
+                "compose-service-count-at-least" => CheckComposeServiceCountAtLeast(workDir, ruleArgs),
                 _                    => (false, $"Unknown SOURCE rule type: '{ruleType}'")
             };
 
@@ -74,14 +84,21 @@ public class SourceAnalyzer
     {
         if (!int.TryParse(args.Trim(), out var expected))
             return (false, $"Invalid count '{args}' — must be an integer.");
-        var files = Directory
-            .EnumerateFiles(workDir, "*.csproj", SearchOption.AllDirectories)
-            .Select(Path.GetFileName)
-            .Where(f => !f!.StartsWith("._", StringComparison.Ordinal))
-            .ToList();
+        var files = GetProjectFileNames(workDir);
         return files.Count == expected
             ? (true,  $"Found {files.Count} project(s): {string.Join(", ", files)}")
             : (false, $"Expected {expected} project(s), found {files.Count}: {string.Join(", ", files)}");
+    }
+
+    private static (bool, string) CheckProjectCountAtLeast(string workDir, string args)
+    {
+        if (!int.TryParse(args.Trim(), out var minimum))
+            return (false, $"Invalid count '{args}' — must be an integer.");
+
+        var files = GetProjectFileNames(workDir);
+        return files.Count >= minimum
+            ? (true, $"Found {files.Count} project(s): {string.Join(", ", files)}")
+            : (false, $"Expected at least {minimum} project(s), found {files.Count}: {string.Join(", ", files)}");
     }
 
     // folder-exists:**/Controllers  →  at least one matching directory exists
@@ -102,6 +119,26 @@ public class SourceAnalyzer
         return found.Count > 0
             ? (true,  $"Found: {string.Join(", ", found)}")
             : (false, $"No file matching '{pattern}' found.");
+    }
+
+    private static (bool, string) CheckFileCountAtLeast(string workDir, string args)
+    {
+        var sep = args.LastIndexOf(':');
+        if (sep < 0)
+            return (false, "file-count-at-least requires 'glob:count' format.");
+
+        var fileGlob = args[..sep];
+        var countText = args[(sep + 1)..];
+        if (!int.TryParse(countText.Trim(), out var minimum))
+            return (false, $"Invalid count '{countText}' — must be an integer.");
+
+        var found = GlobFiles(workDir, fileGlob)
+            .Select(f => Path.GetRelativePath(workDir, f))
+            .ToList();
+
+        return found.Count >= minimum
+            ? (true, $"Found {found.Count} file(s): {string.Join(", ", found)}")
+            : (false, $"Expected at least {minimum} file(s) matching '{fileGlob}', found {found.Count}: {string.Join(", ", found)}");
     }
 
     // file-contains:**/Services/*.cs:IRepository
@@ -134,6 +171,105 @@ public class SourceAnalyzer
                 : (false, $"{matches.Count} file(s) contain '{searchText}': {string.Join(", ", matches)}");
     }
 
+    private static (bool, string) CheckFileContainsAny(string workDir, string args)
+    {
+        var sep = args.IndexOf(':');
+        if (sep < 0)
+            return (false, "file-contains-any requires 'glob:text1|text2' format.");
+
+        var fileGlob = args[..sep];
+        var options = args[(sep + 1)..]
+            .Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        if (options.Length == 0)
+            return (false, "file-contains-any requires at least one search option.");
+
+        var files = GlobFiles(workDir, fileGlob).ToList();
+        if (files.Count == 0)
+            return (false, $"No files matching '{fileGlob}' found in archive.");
+
+        foreach (var file in files)
+        {
+            var content = File.ReadAllText(file);
+            var matched = options.FirstOrDefault(option =>
+                content.Contains(option, StringComparison.OrdinalIgnoreCase));
+            if (matched is not null)
+                return (true, $"{Path.GetRelativePath(workDir, file)} contains '{matched}'.");
+        }
+
+        return (false, $"None of the {files.Count} file(s) matching '{fileGlob}' contain any of: {string.Join(", ", options)}");
+    }
+
+    private static (bool, string) CheckComposeServiceExists(string workDir, string serviceName)
+    {
+        serviceName = serviceName.Trim();
+        if (string.IsNullOrWhiteSpace(serviceName))
+            return (false, "compose-service-exists requires a service name.");
+
+        var services = GetComposeServices(workDir);
+        return services.Contains(serviceName, StringComparer.OrdinalIgnoreCase)
+            ? (true, $"Found compose service '{serviceName}'.")
+            : (false, $"Compose service '{serviceName}' not found. Services: {string.Join(", ", services)}");
+    }
+
+    private static (bool, string) CheckComposeServiceCountAtLeast(string workDir, string args)
+    {
+        if (!int.TryParse(args.Trim(), out var minimum))
+            return (false, $"Invalid count '{args}' — must be an integer.");
+
+        var services = GetComposeServices(workDir);
+        return services.Count >= minimum
+            ? (true, $"Found {services.Count} compose service(s): {string.Join(", ", services)}")
+            : (false, $"Expected at least {minimum} compose service(s), found {services.Count}: {string.Join(", ", services)}");
+    }
+
+    private static List<string> GetProjectFileNames(string workDir) =>
+        Directory
+            .EnumerateFiles(workDir, "*.csproj", SearchOption.AllDirectories)
+            .Select(f => Path.GetFileName(f)!)
+            .Where(f => !f.StartsWith("._", StringComparison.Ordinal))
+            .ToList();
+
+    private static List<string> GetComposeServices(string workDir)
+    {
+        var composePath = GlobFiles(workDir, "**/docker-compose.yml").FirstOrDefault()
+            ?? GlobFiles(workDir, "**/compose.yml").FirstOrDefault();
+
+        if (composePath is null) return [];
+
+        var services = new List<string>();
+        var inServices = false;
+        var servicesIndent = -1;
+
+        foreach (var rawLine in File.ReadLines(composePath))
+        {
+            var line = rawLine.TrimEnd();
+            if (string.IsNullOrWhiteSpace(line) || line.TrimStart().StartsWith('#')) continue;
+
+            if (!inServices)
+            {
+                if (RemoveInlineComment(line).Trim() == "services:")
+                {
+                    inServices = true;
+                    servicesIndent = CountLeadingWhitespace(rawLine);
+                }
+                continue;
+            }
+
+            if (CountLeadingWhitespace(rawLine) <= servicesIndent && !string.IsNullOrWhiteSpace(rawLine))
+                break;
+
+            var match = Regex.Match(rawLine, @"^(?<indent>\s{2,}|\t+)(?<name>[a-zA-Z0-9][a-zA-Z0-9_.-]*):\s*(?:#.*)?$");
+            if (!match.Success) continue;
+
+            var indent = match.Groups["indent"].Value.Length;
+            if (indent == servicesIndent + 2 || indent == servicesIndent + 1)
+                services.Add(match.Groups["name"].Value);
+        }
+
+        return services.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
     // --- Glob helpers ---
 
     private static IEnumerable<string> GlobFiles(string root, string pattern) =>
@@ -156,6 +292,36 @@ public class SourceAnalyzer
             .Replace(@"\?",     "[^/]")
             + "$";
         return Regex.IsMatch(path, regex, RegexOptions.IgnoreCase);
+    }
+
+    private static string RemoveInlineComment(string line)
+    {
+        var inSingleQuote = false;
+        var inDoubleQuote = false;
+
+        for (var i = 0; i < line.Length; i++)
+        {
+            var ch = line[i];
+            if (ch == '\'' && !inDoubleQuote)
+                inSingleQuote = !inSingleQuote;
+            else if (ch == '"' && !inSingleQuote)
+                inDoubleQuote = !inDoubleQuote;
+            else if (ch == '#' && !inSingleQuote && !inDoubleQuote)
+                return line[..i];
+        }
+
+        return line;
+    }
+
+    private static int CountLeadingWhitespace(string line)
+    {
+        var count = 0;
+        foreach (var ch in line)
+        {
+            if (ch is not (' ' or '\t')) break;
+            count++;
+        }
+        return count;
     }
 
     private static LabTestCaseResult Fail(LabTestCase tc, Guid jobId, string message) => new()

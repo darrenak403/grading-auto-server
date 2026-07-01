@@ -99,7 +99,7 @@ public class LabGradingPipeline(
             if (httpTests.Count > 0)
             {
                 dockerStarted = true;
-                var apiPort = await docker.StartContainersAsync(workDir, jobId, ct);
+                var apiPort = await docker.StartContainersAsync(workDir, jobId, httpTests, ct);
                 var httpResults = await testRunner.RunAsync(docker.GetApiBaseUrl(apiPort), jobId, httpTests, ct);
                 allResults.AddRange(httpResults);
             }

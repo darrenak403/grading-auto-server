@@ -104,4 +104,15 @@ public class LabAssignmentsController(
             ? "No new grading jobs created — all submissions already have active jobs."
             : $"{count} grading job(s) created." });
     }
+
+    [HttpPost("lab-assignments/{id:guid}/sync-supabase")]
+    public async Task<IActionResult> SyncSupabaseAsync(
+        Guid id,
+        [FromBody] SyncSupabaseRequest? req,
+        [FromServices] ISupabaseSyncService supabaseSyncService,
+        CancellationToken ct)
+    {
+        var count = await supabaseSyncService.SyncAssignmentAsync(id, req, ct);
+        return Ok(new { SyncedCount = count, Message = $"Successfully synced {count} submissions to Supabase." });
+    }
 }

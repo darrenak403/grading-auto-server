@@ -4,7 +4,9 @@ using System.IO.Compression;
 using System.Globalization;
 using System.Net.Sockets;
 using System.Security;
+using System.Text.Json;
 using System.Text.RegularExpressions;
+using GradingSystem.Domain.Entities;
 using GradingSystem.Worker.Options;
 using Microsoft.Extensions.Options;
 using SharpCompress.Archives;
@@ -42,7 +44,11 @@ public partial class DockerComposeRunner(
     }
 
     /// <summary>Starts Docker containers from an already-extracted workdir. Returns the assigned API port.</summary>
-    public async Task<int> StartContainersAsync(string workDir, Guid jobId, CancellationToken ct)
+    public async Task<int> StartContainersAsync(
+        string workDir,
+        Guid jobId,
+        IReadOnlyCollection<LabTestCase>? readinessTestCases,
+        CancellationToken ct)
     {
         var composePath = Directory.GetFiles(workDir, "docker-compose.yml", SearchOption.AllDirectories)
             .FirstOrDefault() ?? throw new DockerComposeException("docker-compose.yml not found in archive.");
@@ -66,7 +72,7 @@ public partial class DockerComposeRunner(
 
         logger.LogInformation("Docker compose up for job {JobId} on API port {Port}", jobId, apiPort);
 
-        await WaitForApiAsync(apiPort, jobId, composeDir, serviceName, ct);
+        await WaitForApiAsync(apiPort, jobId, composeDir, serviceName, readinessTestCases, ct);
 
         return apiPort;
     }
@@ -74,7 +80,7 @@ public partial class DockerComposeRunner(
     public async Task<int> StartAsync(string archivePath, Guid jobId, CancellationToken ct)
     {
         var workDir = Extract(archivePath, jobId);
-        return await StartContainersAsync(workDir, jobId, ct);
+        return await StartContainersAsync(workDir, jobId, null, ct);
     }
 
     public string GetApiBaseUrl(int port) => $"http://{opts.Value.LabApiHost}:{port}";
@@ -125,12 +131,12 @@ public partial class DockerComposeRunner(
         }
     }
 
-    // Removes host ports and fixed container names from every docker-compose*.yml in composeDir.
+    // Removes host ports and fixed container names from compose files in composeDir.
     // Our override adds back only the API port; DB stays on the internal compose network.
     // Fixed container_name values are not project-scoped and commonly collide across submissions.
     private static void StripHostPortsAndContainerNames(string composeDir)
     {
-        foreach (var file in Directory.EnumerateFiles(composeDir, "docker-compose*.yml"))
+        foreach (var file in EnumerateComposeFiles(composeDir))
         {
             var lines = File.ReadAllLines(file);
             var stripped = new List<string>(lines.Length);
@@ -161,18 +167,33 @@ public partial class DockerComposeRunner(
         }
     }
 
-    // Parses the student's docker-compose.yml to find which service exposes a known HTTP port.
-    // Returns (serviceName, containerPort). Falls back to the best-looking service on port 8080.
+    private static IEnumerable<string> EnumerateComposeFiles(string composeDir)
+    {
+        string[] patterns =
+        [
+            "docker-compose*.yml",
+            "docker-compose*.yaml",
+            "compose*.yml",
+            "compose*.yaml",
+        ];
+
+        return patterns
+            .SelectMany(pattern => Directory.EnumerateFiles(composeDir, pattern))
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+    }
+
+    // Parses the student's docker-compose.yml to find which service should be exposed to the grader.
+    // For microservice labs we must prefer the API Gateway over downstream services; otherwise
+    // login may succeed on one service while the rest of the gateway routes return 404.
     private (string ServiceName, int ContainerPort) DetectApiService(string composeFile)
     {
-        // Known HTTP ports students typically expose
         var httpPorts = new[] { 8080, 5000, 80, 5001, 3000 };
-
         var lines = File.ReadAllLines(composeFile);
 
         string? currentService = null;
         var serviceNames = new List<string>();
         var buildServices = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var servicePorts = new Dictionary<string, HashSet<int>>(StringComparer.OrdinalIgnoreCase);
         bool inServices = false;
         bool inPortsBlock = false;
         int portsIndent = -1;
@@ -199,6 +220,7 @@ public partial class DockerComposeRunner(
             {
                 currentService = svcMatch.Groups[2].Value;
                 serviceNames.Add(currentService);
+                servicePorts.TryAdd(currentService, []);
                 inPortsBlock = false;
                 continue;
             }
@@ -218,10 +240,7 @@ public partial class DockerComposeRunner(
                 var inlineContainerPort = TryParseInlinePorts(rawLine);
                 if (inlineContainerPort.HasValue && httpPorts.Contains(inlineContainerPort.Value))
                 {
-                    logger.LogInformation(
-                        "Detected API service '{Service}' on container port {Port} from docker-compose.yml",
-                        currentService, inlineContainerPort.Value);
-                    return (currentService, inlineContainerPort.Value);
+                    servicePorts[currentService].Add(inlineContainerPort.Value);
                 }
                 continue;
             }
@@ -239,17 +258,26 @@ public partial class DockerComposeRunner(
                 var containerPort = TryParsePortEntry(rawLine);
                 if (containerPort.HasValue && httpPorts.Contains(containerPort.Value))
                 {
-                    logger.LogInformation(
-                        "Detected API service '{Service}' on container port {Port} from docker-compose.yml",
-                        currentService, containerPort.Value);
-                    return (currentService, containerPort.Value);
+                    servicePorts[currentService].Add(containerPort.Value);
                 }
             }
         }
 
-        var fallbackService = PickFallbackService(serviceNames, buildServices);
+        var preferredService = PickPreferredApiService(serviceNames, buildServices, servicePorts);
+        if (!string.IsNullOrWhiteSpace(preferredService)
+            && servicePorts.TryGetValue(preferredService, out var preferredPorts)
+            && preferredPorts.Count > 0)
+        {
+            var preferredPort = httpPorts.First(preferredPorts.Contains);
+            logger.LogInformation(
+                "Detected preferred API service '{Service}' on container port {Port} from docker-compose.yml",
+                preferredService, preferredPort);
+            return (preferredService, preferredPort);
+        }
+
+        var fallbackService = preferredService;
         logger.LogWarning(
-            "Could not detect API service/port from docker-compose.yml — falling back to service='{Service}', port=8080. " +
+            "Could not detect API service/port from docker-compose.yml — falling back to preferred service='{Service}', port=8080. " +
             "Ensure your service exposes one of: 80, 8080, 5000, 5001, 3000.",
             fallbackService);
         return (fallbackService, 8080);
@@ -285,26 +313,47 @@ public partial class DockerComposeRunner(
 
     private async Task RunDockerComposeAsync(string composeDir, Guid jobId, CancellationToken ct, params string[] args)
     {
-        using var buildTimeout = new CancellationTokenSource(
-            TimeSpan.FromSeconds(opts.Value.LabDockerBuildTimeoutSeconds));
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, buildTimeout.Token);
         var dockerArgs = new List<string> { "compose", "-p", $"lab-{jobId}" };
         dockerArgs.AddRange(args);
+        var maxAttempts = Math.Max(1, opts.Value.LabDockerBuildRetryAttempts + 1);
+        var retryDelay = TimeSpan.FromSeconds(Math.Max(1, opts.Value.LabDockerBuildRetryDelaySeconds));
 
-        DockerCommandResult result;
-        try
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
         {
-            result = await RunDockerAsync(composeDir, linked.Token, dockerArgs);
-        }
-        catch (OperationCanceledException) when (buildTimeout.IsCancellationRequested)
-        {
-            throw new DockerComposeTimeoutException(
-                $"docker compose {string.Join(' ', args)} timed out after {opts.Value.LabDockerBuildTimeoutSeconds}s.");
-        }
+            using var buildTimeout = new CancellationTokenSource(
+                TimeSpan.FromSeconds(opts.Value.LabDockerBuildTimeoutSeconds));
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, buildTimeout.Token);
 
-        if (result.ExitCode != 0)
+            DockerCommandResult result;
+            try
+            {
+                result = await RunDockerAsync(composeDir, linked.Token, dockerArgs, opts.Value.LabDockerComposeParallelLimit);
+            }
+            catch (OperationCanceledException) when (buildTimeout.IsCancellationRequested)
+            {
+                throw new DockerComposeTimeoutException(
+                    $"docker compose {string.Join(' ', args)} timed out after {opts.Value.LabDockerBuildTimeoutSeconds}s.");
+            }
+
+            if (result.ExitCode == 0)
+                return;
+
+            if (attempt < maxAttempts && IsTransientDockerBuildFailure(result.Output))
+            {
+                logger.LogWarning(
+                    "Docker compose build failed with transient registry/network error for job {JobId}; retrying attempt {NextAttempt}/{MaxAttempts} after {DelaySeconds}s. Output: {Output}",
+                    jobId,
+                    attempt + 1,
+                    maxAttempts,
+                    retryDelay.TotalSeconds,
+                    result.Output);
+                await Task.Delay(retryDelay, ct);
+                continue;
+            }
+
             throw new DockerComposeException(
                 $"docker compose {string.Join(' ', args)} failed (exit {result.ExitCode}): {result.Output}");
+        }
     }
 
     private async Task CleanupDockerResourcesAsync(
@@ -416,7 +465,7 @@ public partial class DockerComposeRunner(
         using var cts = new CancellationTokenSource(timeout);
         try
         {
-            var result = await RunDockerAsync(workingDirectory, cts.Token, args);
+            var result = await RunDockerAsync(workingDirectory, cts.Token, args, opts.Value.LabDockerComposeParallelLimit);
             if (result.ExitCode != 0)
             {
                 logger.LogWarning(
@@ -442,7 +491,8 @@ public partial class DockerComposeRunner(
     private static async Task<DockerCommandResult> RunDockerAsync(
         string workingDirectory,
         CancellationToken ct,
-        IReadOnlyList<string> args)
+        IReadOnlyList<string> args,
+        int? composeParallelLimit = null)
     {
         var psi = new ProcessStartInfo("docker")
         {
@@ -452,6 +502,9 @@ public partial class DockerComposeRunner(
             RedirectStandardOutput = true,
             RedirectStandardError = true,
         };
+        if (composeParallelLimit is > 0)
+            psi.Environment["COMPOSE_PARALLEL_LIMIT"] = composeParallelLimit.Value.ToString(CultureInfo.InvariantCulture);
+
         foreach (var arg in args)
             psi.ArgumentList.Add(arg);
 
@@ -482,7 +535,42 @@ public partial class DockerComposeRunner(
             : output[^MaxDockerOutputChars..];
     }
 
-    private async Task WaitForApiAsync(int port, Guid jobId, string composeDir, string serviceName, CancellationToken ct)
+    private static bool IsTransientDockerBuildFailure(string output)
+    {
+        if (string.IsNullOrWhiteSpace(output))
+            return false;
+
+        string[] transientMarkers =
+        [
+            "failed to do request",
+            "failed to resolve source metadata",
+            "failed to fetch",
+            "unexpected eof",
+            " eof",
+            "connection reset",
+            "connection refused",
+            "i/o timeout",
+            "tls handshake timeout",
+            "net/http",
+            "server misbehaving",
+            "temporary failure",
+            "context deadline exceeded",
+            "429 too many requests",
+            "503 service unavailable",
+            "502 bad gateway",
+            "504 gateway timeout",
+        ];
+
+        return transientMarkers.Any(marker => output.Contains(marker, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private async Task WaitForApiAsync(
+        int port,
+        Guid jobId,
+        string composeDir,
+        string serviceName,
+        IReadOnlyCollection<LabTestCase>? readinessTestCases,
+        CancellationToken ct)
     {
         using var probe = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
         var baseUrl = GetApiBaseUrl(port);
@@ -490,7 +578,7 @@ public partial class DockerComposeRunner(
         var intervalSeconds = Math.Max(1, opts.Value.LabDockerHealthCheckIntervalSeconds);
         var requiredSuccesses = Math.Max(1, opts.Value.LabDockerHealthCheckRequiredConsecutiveSuccesses);
         var successfulProbes = 0;
-        var healthPaths = GetHealthCheckPaths();
+        var readinessProbes = GetReadinessProbes(readinessTestCases);
 
         while (DateTime.UtcNow < deadline)
         {
@@ -507,13 +595,13 @@ public partial class DockerComposeRunner(
 
             try
             {
-                var probeResult = await ProbeAnyHealthPathAsync(probe, baseUrl, healthPaths, ct);
+                var probeResult = await ProbeReadinessAsync(probe, baseUrl, readinessProbes, ct);
                 successfulProbes++;
                 if (successfulProbes >= requiredSuccesses)
                 {
                     logger.LogInformation(
-                        "Student API on port {Port} is ready after {Successes} successful probe(s), last path {Path} returned {Status} (job {JobId})",
-                        port, successfulProbes, probeResult.Path, probeResult.StatusCode, jobId);
+                        "Student API on port {Port} is ready after {Successes} successful probe(s), last probe {Method} {Path} returned {Status} (job {JobId})",
+                        port, successfulProbes, probeResult.Method, probeResult.Path, probeResult.StatusCode, jobId);
                     return;
                 }
             }
@@ -529,6 +617,29 @@ public partial class DockerComposeRunner(
             $"Student API on port {port} did not respond within {opts.Value.LabDockerHealthCheckTimeoutSeconds}s.");
     }
 
+    private IReadOnlyList<ReadinessProbe> GetReadinessProbes(IReadOnlyCollection<LabTestCase>? testCases)
+    {
+        var testcaseProbes = testCases?
+            .Where(tc => !string.IsNullOrWhiteSpace(tc.UrlTemplate)
+                         && !tc.HttpMethod.Equals("SOURCE", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(tc => tc.Order)
+            .ThenBy(tc => tc.CreatedAt)
+            .Select(tc => new ReadinessProbe(
+                tc.HttpMethod.ToUpperInvariant(),
+                StripQueryString(ResolveProbeTemplate(tc.UrlTemplate)),
+                ResolveProbeTemplate(tc.InputJson)))
+            .Where(probe => Uri.IsWellFormedUriString(probe.Path, UriKind.Relative))
+            .DistinctBy(probe => (probe.Method, probe.Path))
+            .ToList();
+
+        if (testcaseProbes is { Count: > 0 })
+            return testcaseProbes;
+
+        return GetHealthCheckPaths()
+            .Select(path => new ReadinessProbe("GET", path, null))
+            .ToList();
+    }
+
     private IReadOnlyList<string> GetHealthCheckPaths()
     {
         var paths = opts.Value.LabDockerHealthCheckPaths
@@ -540,28 +651,67 @@ public partial class DockerComposeRunner(
         return paths.Count > 0 ? paths : ["/"];
     }
 
-    private static async Task<HealthProbeResult> ProbeAnyHealthPathAsync(
+    private static async Task<HealthProbeResult> ProbeReadinessAsync(
         HttpClient probe,
         string baseUrl,
-        IReadOnlyList<string> paths,
+        IReadOnlyList<ReadinessProbe> probes,
         CancellationToken ct)
     {
         Exception? lastError = null;
-        foreach (var path in paths)
+        HealthProbeResult? lastSuccess = null;
+        foreach (var readinessProbe in probes)
         {
             try
             {
-                using var response = await probe.GetAsync(baseUrl.TrimEnd('/') + path, ct);
-                return new HealthProbeResult(path, (int)response.StatusCode);
+                using var request = BuildReadinessRequest(baseUrl, readinessProbe);
+                using var response = await probe.SendAsync(request, ct);
+                var statusCode = (int)response.StatusCode;
+                if (IsReadyProbeStatusCode(statusCode))
+                {
+                    lastSuccess = new HealthProbeResult(readinessProbe.Method, readinessProbe.Path, statusCode);
+                    continue;
+                }
+
+                lastError = new HttpRequestException(
+                    $"Readiness probe '{readinessProbe.Method} {readinessProbe.Path}' returned non-ready status {statusCode}.");
+                break;
             }
             catch (Exception ex) when (ex is HttpRequestException
                                     || (ex is TaskCanceledException && !ct.IsCancellationRequested))
             {
                 lastError = ex;
+                break;
             }
         }
 
-        throw lastError ?? new HttpRequestException("No health check paths configured.");
+        return lastSuccess ?? throw lastError ?? new HttpRequestException("No health check paths configured.");
+    }
+
+    private static bool IsReadyProbeStatusCode(int statusCode) =>
+        statusCode is >= 200 and < 500;
+
+    private static HttpRequestMessage BuildReadinessRequest(string baseUrl, ReadinessProbe probe)
+    {
+        var request = new HttpRequestMessage(new HttpMethod(probe.Method), baseUrl.TrimEnd('/') + probe.Path);
+        if (probe.Method is "POST" or "PUT" or "PATCH")
+            request.Content = new StringContent(
+                string.IsNullOrWhiteSpace(probe.InputJson) ? "{}" : probe.InputJson,
+                System.Text.Encoding.UTF8,
+                "application/json");
+
+        return request;
+    }
+
+    private static string ResolveProbeTemplate(string? template)
+    {
+        if (string.IsNullOrWhiteSpace(template)) return "/";
+        return Regex.Replace(template, @"\{\{[^{}]+\}\}", "probe");
+    }
+
+    private static string StripQueryString(string path)
+    {
+        var queryIndex = path.IndexOf('?');
+        return queryIndex >= 0 ? path[..queryIndex] : path;
     }
 
     private async Task<ServiceStatus> GetComposeServiceStatusAsync(
@@ -581,12 +731,7 @@ public partial class DockerComposeRunner(
             if (string.IsNullOrWhiteSpace(output))
                 return new ServiceStatus(false, "(no service status output)");
 
-            var isExited = output.Contains("\"State\":\"exited\"", StringComparison.OrdinalIgnoreCase)
-                || output.Contains("\"State\":\"dead\"", StringComparison.OrdinalIgnoreCase)
-                || (output.Contains("\"ExitCode\":", StringComparison.OrdinalIgnoreCase)
-                    && !output.Contains("\"ExitCode\":0", StringComparison.OrdinalIgnoreCase));
-
-            return new ServiceStatus(isExited, output);
+            return new ServiceStatus(IsComposeServiceExited(output), output);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -597,6 +742,62 @@ public partial class DockerComposeRunner(
             logger.LogDebug(ex, "Could not inspect Docker service status for job {JobId}", jobId);
             return new ServiceStatus(false, ex.Message);
         }
+    }
+
+    private static bool IsComposeServiceExited(string output)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(output);
+            foreach (var service in EnumerateServiceStatusElements(doc.RootElement))
+            {
+                var state = GetJsonString(service, "State");
+                if (state.Equals("running", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                if (state.Equals("exited", StringComparison.OrdinalIgnoreCase)
+                    || state.Equals("dead", StringComparison.OrdinalIgnoreCase))
+                    return true;
+
+                if (TryGetJsonInt(service, "ExitCode", out var exitCode) && exitCode != 0)
+                    return true;
+            }
+
+            return false;
+        }
+        catch (JsonException)
+        {
+            return output.Contains("\"State\":\"exited\"", StringComparison.OrdinalIgnoreCase)
+                || output.Contains("\"State\":\"dead\"", StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    private static IEnumerable<JsonElement> EnumerateServiceStatusElements(JsonElement root)
+    {
+        if (root.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in root.EnumerateArray())
+                yield return item;
+        }
+        else
+        {
+            yield return root;
+        }
+    }
+
+    private static string GetJsonString(JsonElement element, string propertyName)
+    {
+        return element.TryGetProperty(propertyName, out var property) && property.ValueKind == JsonValueKind.String
+            ? property.GetString() ?? string.Empty
+            : string.Empty;
+    }
+
+    private static bool TryGetJsonInt(JsonElement element, string propertyName, out int value)
+    {
+        value = 0;
+        return element.TryGetProperty(propertyName, out var property)
+            && property.ValueKind == JsonValueKind.Number
+            && property.TryGetInt32(out value);
     }
 
     private static int PickPort(int start, int end)
@@ -706,18 +907,34 @@ public partial class DockerComposeRunner(
         return line;
     }
 
-    private static string PickFallbackService(List<string> serviceNames, HashSet<string> buildServices)
+    private static string PickPreferredApiService(
+        List<string> serviceNames,
+        HashSet<string> buildServices,
+        Dictionary<string, HashSet<int>> servicePorts)
     {
         if (serviceNames.Count == 0) return "api";
 
-        return serviceNames.FirstOrDefault(s => s.Equals("api", StringComparison.OrdinalIgnoreCase))
+        return serviceNames.FirstOrDefault(IsGatewayServiceName)
+               ?? serviceNames
+                   .Where(servicePorts.ContainsKey)
+                   .FirstOrDefault(s => servicePorts[s].Count > 0)
+               ?? serviceNames.FirstOrDefault(s => s.Equals("api", StringComparison.OrdinalIgnoreCase))
+               ?? serviceNames.FirstOrDefault(s => s.Contains("gateway", StringComparison.OrdinalIgnoreCase))
                ?? serviceNames.FirstOrDefault(s => s.Contains("api", StringComparison.OrdinalIgnoreCase))
                ?? serviceNames.FirstOrDefault(s => s.Contains("web", StringComparison.OrdinalIgnoreCase))
                ?? serviceNames.FirstOrDefault(buildServices.Contains)
                ?? serviceNames[0];
     }
 
+    private static bool IsGatewayServiceName(string serviceName) =>
+        serviceName.Equals("api-gateway", StringComparison.OrdinalIgnoreCase)
+        || serviceName.Equals("gateway", StringComparison.OrdinalIgnoreCase)
+        || serviceName.Contains("gateway", StringComparison.OrdinalIgnoreCase)
+        || serviceName.Contains("ocelot", StringComparison.OrdinalIgnoreCase)
+        || serviceName.Contains("yarp", StringComparison.OrdinalIgnoreCase);
+
     private sealed record DockerCommandResult(int ExitCode, string Output);
     private sealed record ServiceStatus(bool IsExited, string Output);
-    private sealed record HealthProbeResult(string Path, int StatusCode);
+    private sealed record ReadinessProbe(string Method, string Path, string? InputJson);
+    private sealed record HealthProbeResult(string Method, string Path, int StatusCode);
 }

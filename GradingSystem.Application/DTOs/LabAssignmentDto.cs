@@ -2,6 +2,7 @@ namespace GradingSystem.Application.DTOs;
 
 public record CreateLabAssignmentRequest(string Title, string? Description, Guid? SemesterId = null);
 public record UpdateLabAssignmentRequest(string Title, string? Description, Guid? SemesterId = null);
+public record SyncSupabaseRequest(string? LabId, string? ClassName);
 
 public class LabAssignmentDto
 {
