@@ -486,3 +486,5 @@ test-*.ps1
 plans
 
 global.json
+
+supports-su26/
