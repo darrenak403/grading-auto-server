@@ -60,11 +60,27 @@ builder.Services.AddSingleton<LabGradingPipeline>();
 var workerOpts = builder.Configuration.GetSection("Worker").Get<WorkerOptions>() ?? new WorkerOptions();
 var labMaxConcurrentJobs = Math.Max(1, workerOpts.LabMaxConcurrentJobs);
 
+// MaxConcurrentJobs defaults to a CPU-aware value (cores - 1, min 1, max 8) when
+// "Worker:MaxConcurrentJobs" is absent from config — leaving one core free since this
+// host doubles as a dev/CI machine, not a dedicated grading server. An explicit value
+// in config always wins, even if it happens to equal the old hardcoded default (3).
+workerOpts.MaxConcurrentJobs = ConcurrencyCalculator.ResolveMaxConcurrentJobs(
+    rawConfigValue: builder.Configuration["Worker:MaxConcurrentJobs"],
+    configuredValue: workerOpts.MaxConcurrentJobs,
+    processorCount: Environment.ProcessorCount);
+
+Console.WriteLine($"[Worker] Effective MaxConcurrentJobs = {workerOpts.MaxConcurrentJobs} " +
+    $"(ProcessorCount = {Environment.ProcessorCount})");
+
 builder.Services.AddMassTransit(x =>
 {
-    x.AddConsumer<GradeJobConsumer>().Endpoint(e =>
+    x.AddConsumer<GradeJobConsumer>(c =>
+    {
+        c.UseConcurrentMessageLimit(workerOpts.MaxConcurrentJobs);
+    }).Endpoint(e =>
     {
         e.PrefetchCount = workerOpts.MaxConcurrentJobs;
+        e.ConcurrentMessageLimit = workerOpts.MaxConcurrentJobs;
     });
     x.AddConsumer<LabGradeJobConsumer>(c =>
     {

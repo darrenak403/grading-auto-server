@@ -15,28 +15,48 @@ public partial class ArtifactRunner(
     IConfiguration config,
     ILogger<ArtifactRunner> logger)
 {
-    public async Task<StudentContext> RunAsync(
+    // Process-local reservation registry closing the PickPort/IsPortFree TOCTOU race:
+    // IsPortFree's TcpListener probe alone isn't enough once same-assignment submissions
+    // can run concurrently, since the real bind happens later in StartDotnet.
+    private readonly HashSet<int> _reservedPorts = [];
+    private readonly object _portLock = new();
+
+    /// <summary>
+    /// Computes the sandbox path for a job without doing any I/O. Callers create the
+    /// <see cref="StudentContext"/> via this method *before* calling <see cref="RunAsync"/>
+    /// so that partial state (already-started processes, reserved ports) set on the context
+    /// by <see cref="RunAsync"/> mid-run remains reachable for <see cref="CleanupAsync"/> even
+    /// if <see cref="RunAsync"/> is cancelled (e.g. a per-submission timeout) before returning.
+    /// </summary>
+    public StudentContext CreateContext(GradingJob job)
+    {
+        var basePath = string.IsNullOrEmpty(config["Storage:BasePath"]) ? "/storage" : config["Storage:BasePath"]!;
+        var sandboxPath = Path.Combine(basePath, "sandbox", job.Id.ToString());
+        return new StudentContext { SandboxPath = sandboxPath };
+    }
+
+    public virtual async Task RunAsync(
         GradingJob job,
         IReadOnlyList<Question> questions,
+        StudentContext ctx,
         CancellationToken ct)
     {
         var submission = job.Submission;
         var assignment = submission.Assignment;
-        var basePath = string.IsNullOrEmpty(config["Storage:BasePath"]) ? "/storage" : config["Storage:BasePath"]!;
+        var sandboxPath = ctx.SandboxPath;
 
-        var sandboxPath = Path.Combine(basePath, "sandbox", job.Id.ToString());
         Directory.CreateDirectory(sandboxPath);
         var studentRoot = Path.Combine(sandboxPath, "student");
 
         ZipFile.ExtractToDirectory(submission.ArtifactZipPath, studentRoot);
         logger.LogInformation("Extracted artifact for job {JobId} → {Path}", job.Id, studentRoot);
 
-        string? dbName = null;
         bool hasApiQuestion = questions.Any(q => q.Type == QuestionType.Api);
 
         if (hasApiQuestion && assignment.DatabaseSqlPath != null)
         {
-            dbName = $"grading_{job.Id:N}";
+            var dbName = $"grading_{job.Id:N}";
+            ctx.DatabaseName = dbName;
             await SetupDatabaseAsync(dbName, assignment.DatabaseSqlPath, ct);
             logger.LogInformation("SQL Server sandbox ready: {DbName}", dbName);
         }
@@ -44,12 +64,6 @@ public partial class ArtifactRunner(
         {
             logger.LogWarning("Assignment has API question but DatabaseSqlPath is null — student app will use its own connection string and may return 500");
         }
-
-        var ctx = new StudentContext
-        {
-            SandboxPath = sandboxPath,
-            DatabaseName = dbName,
-        };
 
         // Start given API from zip (takes priority over static GivenApiBaseUrl for Q2)
         string? effectiveGivenApiBaseUrl = assignment.GivenApiBaseUrl;
@@ -65,11 +79,16 @@ public partial class ArtifactRunner(
             var givenTarget = FindExecutableTarget(givenRoot);
             var givenPort = PickPort();
             var givenProcess = StartDotnet(givenTarget, givenPort);
+
+            // Attach to ctx before awaiting the health check so CleanupAsync can still find and
+            // kill this process / release this port if WaitForPortAsync throws (timeout, crash,
+            // or shutdown cancellation) — otherwise a startup-time failure leaks both forever.
+            ctx.GivenApiProcess = givenProcess;
+            ctx.GivenApiPort = givenPort;
+
             var bindHost = opts.Value.BindHost;
             await WaitForPortAsync($"http://{bindHost}:{givenPort}", givenProcess, ct);
 
-            ctx.GivenApiProcess = givenProcess;
-            ctx.GivenApiPort = givenPort;
             effectiveGivenApiBaseUrl = $"http://{bindHost}:{givenPort}";
             logger.LogInformation("Given API started on port {Port} for job {JobId}", givenPort, job.Id);
         }
@@ -105,21 +124,23 @@ public partial class ArtifactRunner(
 
             var target = FindExecutableTarget(questionDir);
             var port = PickPort();
-            var env = BuildEnv(question, dbName, effectiveGivenApiBaseUrl, questionDir);
+            var env = BuildEnv(question, ctx.DatabaseName, effectiveGivenApiBaseUrl, questionDir);
 
             var process = StartDotnet(target, port, env);
-            await WaitForPortAsync($"http://{opts.Value.BindHost}:{port}", process, ct);
 
+            // Attach to ctx before awaiting the health check — see the matching comment above
+            // for the given-API process — so a startup-time failure still leaves the process
+            // and port reachable for CleanupAsync instead of leaking them.
             ctx.QuestionApps[question.Id] = new QuestionApp { Process = process, Port = port };
+
+            await WaitForPortAsync($"http://{opts.Value.BindHost}:{port}", process, ct);
 
             logger.LogInformation("Q{Type} app on port {Port} for question {QId}",
                 question.Type, port, question.Id);
         }
-
-        return ctx;
     }
 
-    public async Task CleanupAsync(StudentContext ctx)
+    public virtual async Task CleanupAsync(StudentContext ctx)
     {
         foreach (var (qId, app) in ctx.QuestionApps)
         {
@@ -128,8 +149,10 @@ public partial class ArtifactRunner(
             {
                 if (!app.Process.HasExited)
                     app.Process.Kill(entireProcessTree: true);
+                app.Process.WaitForExit(5000);
             }
             catch (Exception ex) { logger.LogWarning(ex, "Failed to kill process for question {QId}", qId); }
+            finally { ReleasePort(app.Port); }
         }
 
         if (ctx.GivenApiProcess != null)
@@ -138,8 +161,10 @@ public partial class ArtifactRunner(
             {
                 if (!ctx.GivenApiProcess.HasExited)
                     ctx.GivenApiProcess.Kill(entireProcessTree: true);
+                ctx.GivenApiProcess.WaitForExit(5000);
             }
             catch (Exception ex) { logger.LogWarning(ex, "Failed to kill given API process"); }
+            finally { ReleasePort(ctx.GivenApiPort); }
         }
 
         try
@@ -364,15 +389,33 @@ public partial class ArtifactRunner(
         return process;
     }
 
-    private int PickPort()
+    internal int PickPort()
     {
         var rng = new Random();
-        for (int i = 0; i < 100; i++)
+        lock (_portLock)
         {
-            var port = rng.Next(opts.Value.ArtifactPortRangeStart, opts.Value.ArtifactPortRangeEnd + 1);
-            if (IsPortFree(port)) return port;
+            for (int i = 0; i < 100; i++)
+            {
+                var port = rng.Next(opts.Value.ArtifactPortRangeStart, opts.Value.ArtifactPortRangeEnd + 1);
+                if (_reservedPorts.Contains(port)) continue;
+                if (!IsPortFree(port)) continue;
+
+                // Claim atomically in the same critical section as the IsPortFree probe —
+                // the OS-level check alone is a check-then-act race once two callers can
+                // run concurrently (the real bind happens later, in StartDotnet).
+                _reservedPorts.Add(port);
+                return port;
+            }
         }
         throw new InvalidOperationException("No free port in configured range.");
+    }
+
+    internal void ReleasePort(int port)
+    {
+        lock (_portLock)
+        {
+            _reservedPorts.Remove(port);
+        }
     }
 
     private static bool IsPortFree(int port)

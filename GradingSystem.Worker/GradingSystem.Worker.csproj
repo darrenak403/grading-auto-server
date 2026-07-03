@@ -23,4 +23,8 @@
     <ProjectReference Include="..\GradingSystem.Application\GradingSystem.Application.csproj" />
     <ProjectReference Include="..\GradingSystem.Infrastructure\GradingSystem.Infrastructure.csproj" />
   </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="GradingSystem.Tests" />
+  </ItemGroup>
 </Project>

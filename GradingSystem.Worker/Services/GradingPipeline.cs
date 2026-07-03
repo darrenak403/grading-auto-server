@@ -1,18 +1,23 @@
-using System.Collections.Concurrent;
 using GradingSystem.Application.Interfaces;
 using GradingSystem.Application.Services;
 using GradingSystem.Domain.Entities;
+using GradingSystem.Worker.Options;
+using Microsoft.Extensions.Options;
 
 namespace GradingSystem.Worker.Services;
 
+// No per-assignment lock here on purpose: each submission already runs against its own
+// isolated database (grading_{jobId:N}) and sandbox directory, so two submissions of the
+// same assignment ("mã đề") can safely grade concurrently. The one shared resource — TCP
+// ports — is guarded separately by ArtifactRunner's port reservation registry. Re-verify
+// both assumptions before reintroducing serialization here.
 public class GradingPipeline(
     IServiceScopeFactory scopeFactory,
     ArtifactRunner artifactRunner,
     TestRunner testRunner,
+    IOptions<WorkerOptions> opts,
     ILogger<GradingPipeline> logger)
 {
-    private readonly ConcurrentDictionary<Guid, SemaphoreSlim> _locks = new();
-
     public async Task ProcessAsync(Guid gradingJobId, CancellationToken ct)
     {
         await using var scope = scopeFactory.CreateAsyncScope();
@@ -51,11 +56,16 @@ public class GradingPipeline(
         var questions = (await uow.Questions.FindAsync(q => q.AssignmentId == assignment.Id))
                         .OrderBy(q => q.CreatedAt).ToList();
 
-        // Per-assignment lock prevents concurrent SQL Server setup for the same mã đề
-        var semaphore = _locks.GetOrAdd(assignment.Id, _ => new SemaphoreSlim(1, 1));
-        await semaphore.WaitAsync(ct);
+        // Created up front (sandbox path only, no I/O) so that any processes/ports RunAsync
+        // manages to start before a timeout fires are still reachable by CleanupAsync below —
+        // RunAsync mutates this same instance instead of building+returning its own.
+        var ctx = artifactRunner.CreateContext(job);
 
-        StudentContext? ctx = null;
+        // Scoped strictly to this single ProcessAsync call: GradingPipeline is a singleton,
+        // so the linked CTS/timer must never be stored on shared state, only this local var.
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeoutCts.CancelAfter(TimeSpan.FromSeconds(opts.Value.SubmissionTimeoutSeconds));
+
         try
         {
             job.Status    = JobStatus.Running;
@@ -66,8 +76,8 @@ public class GradingPipeline(
             logger.LogInformation("Processing job {JobId} for submission {SubId} (round: {Round})",
                 job.Id, submission.Id, job.GradingRound);
 
-            ctx = await artifactRunner.RunAsync(job, questions, ct);
-            await testRunner.RunAsync(job, ctx, uow, ct);
+            await artifactRunner.RunAsync(job, questions, ctx, timeoutCts.Token);
+            await testRunner.RunAsync(job, ctx, uow, timeoutCts.Token);
 
             job.Status        = JobStatus.Done;
             submission.Status = SubmissionStatus.Done;
@@ -95,7 +105,14 @@ public class GradingPipeline(
             // Insert 0-score results for any question without a result for this job
             var existingResults = await uow.QuestionResults.FindAsync(r => r.GradingJobId == job.Id);
             var gradedIds = existingResults.Select(r => r.QuestionId).ToHashSet();
-            var setupNote = BulkUploadService.MakeNote($"Lỗi setup: {ex.Message}");
+
+            // Only timeoutCts firing (and not the outer token) means the student app genuinely
+            // ran past SubmissionTimeoutSeconds — a worker shutdown cancels the outer ct too,
+            // so that case must not be reported with the same "timed out" wording.
+            var isTimeout = timeoutCts.IsCancellationRequested && !ct.IsCancellationRequested;
+            var setupNote = isTimeout
+                ? BulkUploadService.MakeNote($"Quá thời gian xử lý (timeout sau {opts.Value.SubmissionTimeoutSeconds}s) — bài làm đã bị dừng")
+                : BulkUploadService.MakeNote($"Lỗi setup: {ex.Message}");
             foreach (var q in questions.Where(q => !gradedIds.Contains(q.Id)))
             {
                 await uow.QuestionResults.AddAsync(new QuestionResult
@@ -111,11 +128,8 @@ public class GradingPipeline(
         }
         finally
         {
-            if (ctx is not null)
-            {
-                try { await artifactRunner.CleanupAsync(ctx); }
-                catch (Exception ex) { logger.LogWarning(ex, "Cleanup failed for job {JobId}", job.Id); }
-            }
+            try { await artifactRunner.CleanupAsync(ctx); }
+            catch (Exception ex) { logger.LogWarning(ex, "Cleanup failed for job {JobId}", job.Id); }
 
             // Delete artifact zip immediately after grading to free storage
             DeleteArtifact(submission);
@@ -123,9 +137,12 @@ public class GradingPipeline(
             job.FinishedAt = DateTime.UtcNow;
             uow.GradingJobs.Update(job);
             uow.Submissions.Update(submission);
-            await uow.SaveChangesAsync(ct);
 
-            semaphore.Release();
+            // CancellationToken.None: on worker shutdown ct is already cancelled by this point,
+            // and this save is what persists the Failed status just set in the catch block above —
+            // using ct here would let shutdown itself cancel away the very status write that
+            // records the shutdown's effect, leaving the job stuck in Running after restart.
+            await uow.SaveChangesAsync(CancellationToken.None);
         }
     }
 

@@ -313,11 +313,11 @@ namespace GradingSystem.Infrastructure.Persistence.Migrations
                     b.Property<string>("ExpectJson")
                         .HasColumnType("text");
 
-                    b.Property<string>("HeadersJson")
-                        .HasColumnType("text");
-
                     b.Property<int>("ExpectedStatusCode")
                         .HasColumnType("integer");
+
+                    b.Property<string>("HeadersJson")
+                        .HasColumnType("text");
 
                     b.Property<string>("HttpMethod")
                         .IsRequired()

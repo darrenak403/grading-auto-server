@@ -5,8 +5,10 @@ using GradingSystem.Application.DTOs;
 using GradingSystem.Application.Exceptions;
 using GradingSystem.Application.Interfaces;
 using GradingSystem.Domain.Entities;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Npgsql;
 
 namespace GradingSystem.Application.Services;
 
@@ -32,6 +34,7 @@ public class BulkUploadService(
         var result = new BulkUploadResultDto();
         var tempRoot = Path.Combine(Path.GetTempPath(), "bulk_upload", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tempRoot);
+        var createdArtifactDirs = new List<string>();
 
         try
         {
@@ -62,6 +65,7 @@ public class BulkUploadService(
                 var submissionId = Guid.NewGuid();
                 var artifactDir = Path.Combine(_basePath, "submissions", submissionId.ToString());
                 Directory.CreateDirectory(artifactDir);
+                createdArtifactDirs.Add(artifactDir);
                 var artifactZipPath = Path.Combine(artifactDir, "artifact.zip");
 
                 using (var outZip = ZipFile.Open(artifactZipPath, ZipArchiveMode.Create))
@@ -172,6 +176,17 @@ public class BulkUploadService(
 
             await uow.SaveChangesAsync(ct);
         }
+        catch
+        {
+            // Save failed (e.g. a unique-constraint collision that CreateNewRoundAsync will retry) —
+            // the artifact zips already written to persistent storage for this attempt are now
+            // orphaned (no Submission row references them), so clean them up before rethrowing.
+            foreach (var dir in createdArtifactDirs)
+            {
+                try { Directory.Delete(dir, recursive: true); } catch { /* best effort */ }
+            }
+            throw;
+        }
         finally
         {
             try { Directory.Delete(tempRoot, recursive: true); } catch { /* best effort */ }
@@ -179,6 +194,54 @@ public class BulkUploadService(
 
         return result;
     }
+
+    public async Task<BulkUploadResultDto> ParseAndCreateForLatestRoundAsync(
+        Guid assignmentId, Stream masterZipStream, CancellationToken ct = default)
+    {
+        var existingRounds = (await uow.Submissions.FindAsync(s => s.AssignmentId == assignmentId))
+            .Select(s => s.GradingRound).Distinct().ToList();
+        var targetRound = GradingRoundHelper.LatestRoundLabel(existingRounds);
+
+        return await ParseAndCreateAsync(assignmentId, targetRound, masterZipStream, ct);
+    }
+
+    public async Task<BulkUploadResultDto> CreateNewRoundAsync(
+        Guid assignmentId, Stream masterZipStream, CancellationToken ct = default)
+    {
+        _ = await uow.Assignments.GetByIdAsync(assignmentId)
+            ?? throw new NotFoundException($"Assignment '{assignmentId}' not found.");
+
+        // Buffer once so a unique-constraint retry can re-read the archive without
+        // touching the caller's (possibly non-seekable) request stream.
+        using var buffered = new MemoryStream();
+        await masterZipStream.CopyToAsync(buffered, ct);
+
+        const int maxAttempts = 3;
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            var existingRounds = (await uow.Submissions.FindAsync(s => s.AssignmentId == assignmentId))
+                .Select(s => s.GradingRound).Distinct().ToList();
+            var nextRound = GradingRoundHelper.NextRoundLabel(existingRounds);
+
+            buffered.Position = 0;
+            try
+            {
+                return await ParseAndCreateAsync(assignmentId, nextRound, buffered, ct);
+            }
+            catch (DbUpdateException ex) when (attempt < maxAttempts && IsUniqueViolation(ex))
+            {
+                logger.LogWarning(ex,
+                    "Round '{Round}' collided with a concurrent creation on attempt {Attempt}, retrying.",
+                    nextRound, attempt);
+            }
+        }
+
+        throw new BadRequestException(
+            "Could not create a new grading round after multiple attempts due to concurrent creation; please retry.");
+    }
+
+    private static bool IsUniqueViolation(DbUpdateException ex) =>
+        ex.InnerException is PostgresException { SqlState: "23505" };
 
     public static string MakeNote(string message) =>
         JsonSerializer.Serialize(new[]

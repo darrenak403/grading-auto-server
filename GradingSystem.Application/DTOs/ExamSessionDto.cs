@@ -73,3 +73,18 @@ public class ImportParticipantsResultDto
     public int Skipped { get; set; }
     public List<string> Errors { get; set; } = [];
 }
+
+public class ImportSessionParticipantsErrorDto
+{
+    public int Line { get; set; }
+    public string Raw { get; set; } = string.Empty;
+    public string Reason { get; set; } = string.Empty;
+}
+
+public class ImportSessionParticipantsResultDto
+{
+    public int Created { get; set; }
+    public int Updated { get; set; }
+    public int Skipped { get; set; }
+    public List<ImportSessionParticipantsErrorDto> Errors { get; set; } = [];
+}

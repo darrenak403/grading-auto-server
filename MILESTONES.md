@@ -23,13 +23,15 @@ _Mục đích: Gom nhóm nhiều đề thi lại vào chung 1 đợt thi (ví d�
 
 ### Milestone 3: Nộp bài & Chấm thi tự động
 
-_Mục đích: Đưa source code của toàn bộ sinh viên vào hệ thống và kích hoạt Worker chấm bài._
+_Mục đích: Đưa source code của toàn bộ sinh viên vào hệ thống và kích hoạt Worker chấm bài. Hỗ trợ nhiều lần chấm (grading rounds)._
 
 - **FE Flow chạy như thế nào:**
   - **URL:** `/assignments/[id]` (Tab: Submit & Grade).
   - **Import Sinh viên:** FE cho upload file `.csv` chứa mã số SV, gọi API `POST .../participants/import`.
-  - **Upload Bài thi:** Giảng viên upload file `master.zip` (chứa code của hàng chục SV). FE dùng `FormData` đẩy lên API `POST .../bulk-upload`.
-  - **Trigger Grading:** Khi giảng viên bấm nút "Grade", FE gọi `POST .../grade`. Lúc này, FE sẽ bắt đầu một vòng lặp (Polling) dùng `setInterval` để liên tục gọi API `GET /grading-jobs` mỗi 2 giây nhằm cập nhật thanh tiến trình (Progress Bar) từ trạng thái `Pending` -> `Running` -> `Done` ngay trên màn hình mà không cần f5 tải lại trang.
+  - **Quản lý Rounds:** FE hiển thị dropdown để chọn round hiện tại ("Lần 1", "Lần 2", ...). Mỗi round độc lập. FE gọi `GET .../rounds` để lấy danh sách và `POST .../rounds` để tạo round mới (auto-numbered).
+  - **Upload Bài thi:** Giảng viên có 2 cách: (1) upload file `master.zip` vào round hiện tại qua `POST .../bulk-upload`, hoặc (2) tạo round mới (tự động đánh số "Lần N+1") qua `POST .../rounds` với file upload.
+  - **Trigger Grading:** Khi giảng viên bấm nút "Grade", FE gọi `POST .../grade`. FE polling `GET /grading-jobs` mỗi 2 giây để cập nhật thanh tiến trình từ `Pending` -> `Running` -> `Done`.
+  - **Retry Failed:** Nếu một submission fail, giảng viên bấm nút "Retry" (chỉ hiển thị khi latestJobStatus=Failed) để gọi `POST /submissions/{id}/grade`. Endpoint này chỉ cho phép retry khi job cuối cùng fail (infra recovery only).
 
 ### Milestone 4: Xem kết quả & Điều chỉnh điểm (Chấm tay)
 

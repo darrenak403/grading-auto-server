@@ -88,7 +88,7 @@ Giảng viên tạo Assignment → upload `database.sql` (Q1) và/hoặc Given A
 
 ### Nộp bài & chấm
 
-Import CSV sinh viên → upload `master.zip` → **Grade** → API publish message → Worker: extract artifact, chạy test, lưu `QuestionResult`, cleanup.
+Import CSV sinh viên → upload `master.zip` (thêm vào round hiện tại) hoặc tạo round mới → **Grade** → API publish message → Worker: extract artifact, chạy test, lưu `QuestionResult`, cleanup. Mỗi round được đánh số tự động ("Lần 1", "Lần 2", ...) và độc lập với nhau.
 
 ### Kết quả & export
 
@@ -106,9 +106,10 @@ Base: `http://localhost:5049/api/v1` · Swagger: `http://localhost:5049/swagger`
 
 | Nhóm | Ví dụ |
 |------|--------|
-| Assignments | `POST /assignments`, `POST .../grade`, `POST .../bulk-upload` |
+| Assignments | `POST /assignments`, `POST .../grade` |
+| Bulk Upload & Rounds | `POST .../bulk-upload` (thêm vào round hiện tại), `POST .../rounds` (tạo round mới auto-numbered) |
 | Questions / TestCases | CRUD theo assignment / question |
-| Submissions / Results | `GET .../submissions`, `PUT .../adjust` |
+| Submissions / Results | `GET .../submissions` (filter by round), `POST .../grade` (retry chỉ khi status=Failed), `PUT .../adjust` |
 | ExamSessions / Exports | session + download Excel |
 
 Chi tiết endpoint: mở Swagger khi API đang chạy.
@@ -130,6 +131,10 @@ storage/
 
 - API versioning: v1 (mặc định), v2.
 - Upload tối đa **200 MB**.
-- Worker: mặc định **3** job đồng thời (cấu hình trong `.env` / appsettings).
+- **Worker concurrency:**
+  - `MaxConcurrentJobs`: Mặc định = `Math.Clamp(CoreCount - 1, 1, 8)` (tự động theo CPU).
+    Cấu hình trong `.env` qua `WORKER_MAX_CONCURRENT_JOBS` hoặc appsettings.json (`Worker:MaxConcurrentJobs`).
+  - `SubmissionTimeoutSeconds`: Mặc định = **90 giây**. Cấu hình qua `WORKER_SUBMISSION_TIMEOUT_SECONDS`.
+    Timeout này áp dụng toàn bộ quá trình chấm một bài (artifact run + test execution); vượt quá sẽ kill process và mark Failed.
 - Điểm: `FinalScore = AdjustedScore ?? AutoScore`.
 - Q1: database tạm trên SQL Server, xóa sau khi chấm.

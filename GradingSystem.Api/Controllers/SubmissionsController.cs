@@ -12,10 +12,18 @@ public class SubmissionsController(
     public async Task<IActionResult> GetByAssignmentAsync(
         Guid assignmentId,
         [FromQuery] string? studentCode,
+        [FromQuery] string? gradingRound,
         CancellationToken ct)
     {
-        var list = await submissionService.GetByAssignmentIdAsync(assignmentId, studentCode, ct);
+        var list = await submissionService.GetByAssignmentIdAsync(assignmentId, studentCode, gradingRound, ct);
         return Ok(list);
+    }
+
+    [HttpGet("assignments/{assignmentId:guid}/rounds")]
+    public async Task<IActionResult> GetRoundsAsync(Guid assignmentId, CancellationToken ct)
+    {
+        var rounds = await submissionService.GetRoundsAsync(assignmentId, ct);
+        return Ok(rounds);
     }
 
     [HttpGet("submissions/{id:guid}")]
@@ -44,5 +52,12 @@ public class SubmissionsController(
     {
         var deleted = await submissionService.DeleteAsync(id, ct);
         return Ok(deleted, "Submission deleted.");
+    }
+
+    [HttpPost("submissions/{id:guid}/grade")]
+    public async Task<IActionResult> RegradeAsync(Guid id, CancellationToken ct)
+    {
+        var job = await submissionService.RegradeAsync(id, ct);
+        return Ok(job, "Regrade job queued.");
     }
 }
