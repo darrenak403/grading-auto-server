@@ -16,6 +16,37 @@ public class LabAssignmentsController(
         return Ok(result);
     }
 
+    [HttpGet("lab-assignments/supabase-dropdown-options")]
+    public async Task<IActionResult> GetSupabaseDropdownOptionsAsync(
+        [FromServices] ISupabaseSyncService supabaseSyncService,
+        [FromQuery] string? termId,
+        [FromQuery] string? className,
+        CancellationToken ct)
+    {
+        var result = await supabaseSyncService.GetDropdownOptionsAsync(termId, className, ct);
+        return Ok(result);
+    }
+
+    [HttpPost("lab-assignments/sync-supabase-grade")]
+    public async Task<IActionResult> SyncSupabaseGradeAsync(
+        [FromBody] SyncSupabaseGradeRequest req,
+        [FromServices] ISupabaseSyncService supabaseSyncService,
+        CancellationToken ct)
+    {
+        var result = await supabaseSyncService.SyncGradeAsync(req, ct);
+        return Ok(result, "Successfully synced grade to Supabase.");
+    }
+
+    [HttpPost("lab-assignments/sync-supabase-grades")]
+    public async Task<IActionResult> SyncSupabaseGradesAsync(
+        [FromBody] SyncSupabaseGradesRequest req,
+        [FromServices] ISupabaseSyncService supabaseSyncService,
+        CancellationToken ct)
+    {
+        var result = await supabaseSyncService.SyncGradesAsync(req, ct);
+        return Ok(result, $"Synced {result.SyncedCount}/{result.Total} grade(s) to Supabase.");
+    }
+
     [HttpGet("lab-assignments/{id:guid}")]
     public async Task<IActionResult> GetByIdAsync(Guid id, CancellationToken ct)
     {
