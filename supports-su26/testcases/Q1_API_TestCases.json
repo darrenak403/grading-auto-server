@@ -1,0 +1,109 @@
+[
+  {
+    "name": "GET /api/journals – list + paperCount",
+    "httpMethod": "GET",
+    "urlTemplate": "/api/journals",
+    "expectedStatus": 200,
+    "expectedBody": [
+      { "journalId": 1, "journalName": "Vietnam Journal of Computer Science", "impactFactor": 2.4, "paperCount": 3 },
+      { "journalId": 2, "journalName": "International Journal of Biotechnology", "impactFactor": 3.1, "paperCount": 2 },
+      { "journalId": 3, "journalName": "Journal of Renewable Energy", "impactFactor": 1.8, "paperCount": 2 },
+      { "journalId": 4, "journalName": "Environmental Science Review", "impactFactor": 2.0, "paperCount": 1 }
+    ],
+    "order": 1,
+    "score": 1
+  },
+  {
+    "name": "GET /api/filter-papers – no filter, default sort by CitationCount desc",
+    "httpMethod": "GET",
+    "urlTemplate": "/api/filter-papers",
+    "expectedStatus": 200,
+    "expectedBody": [
+      { "paperId": 3, "title": "Phan tich gen di truyen benh ung thu", "publishYear": 2021, "citationCount": 60, "journalName": "International Journal of Biotechnology", "leadAuthor": "GS. Hoang Van Thanh", "topicList": ["Cong nghe sinh hoc", "Moi truong"] },
+      { "paperId": 1, "title": "Ung dung AI trong chan doan y te", "publishYear": 2023, "citationCount": 45, "journalName": "Vietnam Journal of Computer Science", "leadAuthor": "TS. Bui Quang Vinh", "topicList": ["Tri tue nhan tao", "Du lieu lon"] },
+      { "paperId": 5, "title": "Danh gia o nhiem nguon nuoc song Mekong", "publishYear": 2020, "citationCount": 35, "journalName": "Environmental Science Review", "leadAuthor": "TS. Vu Duc Manh", "topicList": ["Moi truong"] },
+      { "paperId": 8, "title": "Vi sinh vat xu ly nuoc thai cong nghiep", "publishYear": 2022, "citationCount": 27, "journalName": "International Journal of Biotechnology", "leadAuthor": "GS. Hoang Van Thanh", "topicList": ["Cong nghe sinh hoc", "Moi truong"] },
+      { "paperId": 2, "title": "He thong Big Data cho giao duc truc tuyen", "publishYear": 2022, "citationCount": 20, "journalName": "Vietnam Journal of Computer Science", "leadAuthor": "ThS. Ngo Thi Lan", "topicList": ["Tri tue nhan tao", "Du lieu lon"] },
+      { "paperId": 6, "title": "Mo hinh hoc sau du bao thoi tiet", "publishYear": 2023, "citationCount": 18, "journalName": "Vietnam Journal of Computer Science", "leadAuthor": "TS. Bui Quang Vinh", "topicList": ["Tri tue nhan tao", "Du lieu lon"] },
+      { "paperId": 4, "title": "Ung dung IoT trong luoi dien thong minh", "publishYear": 2024, "citationCount": 12, "journalName": "Journal of Renewable Energy", "leadAuthor": "TS. Bui Quang Vinh", "topicList": ["Nang luong tai tao", "IoT"] },
+      { "paperId": 7, "title": "Nghien cuu pin nang luong mat troi the he moi", "publishYear": 2024, "citationCount": 8, "journalName": "Journal of Renewable Energy", "leadAuthor": "TS. Vu Duc Manh", "topicList": ["Nang luong tai tao"] }
+    ],
+    "order": 2,
+    "score": 1
+  },
+  {
+    "name": "GET /api/filter-papers?topic=Tri tue nhan tao&minCitations=15",
+    "httpMethod": "GET",
+    "urlTemplate": "/api/filter-papers",
+    "input": { "topic": "Tri tue nhan tao", "minCitations": 15 },
+    "expectedStatus": 200,
+    "expectedBody": [
+      { "paperId": 1, "title": "Ung dung AI trong chan doan y te", "publishYear": 2023, "citationCount": 45, "journalName": "Vietnam Journal of Computer Science", "leadAuthor": "TS. Bui Quang Vinh", "topicList": ["Tri tue nhan tao", "Du lieu lon"] },
+      { "paperId": 2, "title": "He thong Big Data cho giao duc truc tuyen", "publishYear": 2022, "citationCount": 20, "journalName": "Vietnam Journal of Computer Science", "leadAuthor": "ThS. Ngo Thi Lan", "topicList": ["Tri tue nhan tao", "Du lieu lon"] },
+      { "paperId": 6, "title": "Mo hinh hoc sau du bao thoi tiet", "publishYear": 2023, "citationCount": 18, "journalName": "Vietnam Journal of Computer Science", "leadAuthor": "TS. Bui Quang Vinh", "topicList": ["Tri tue nhan tao", "Du lieu lon"] }
+    ],
+    "order": 3,
+    "score": 1.5
+  },
+  {
+    "name": "GET /api/filter-papers?minCitations=-5 → 400",
+    "httpMethod": "GET",
+    "urlTemplate": "/api/filter-papers",
+    "input": { "minCitations": -5 },
+    "expectedStatus": 400,
+    "order": 4,
+    "score": 0.5
+  },
+  {
+    "name": "POST /api/papers – trung title → 400",
+    "httpMethod": "POST",
+    "urlTemplate": "/api/papers",
+    "input": { "title": "Ung dung AI trong chan doan y te", "publishYear": 2025, "journalId": 1 },
+    "expectedStatus": 400,
+    "order": 5,
+    "score": 0.5
+  },
+  {
+    "name": "POST /api/papers – tao bai bao moi hop le",
+    "httpMethod": "POST",
+    "urlTemplate": "/api/papers",
+    "input": { "title": "Nghien cuu blockchain trong y te", "publishYear": 2025, "journalId": 1 },
+    "expectedStatus": 201,
+    "expectedBody": {
+      "paperId": 9,
+      "title": "Nghien cuu blockchain trong y te",
+      "publishYear": 2025,
+      "journalId": 1,
+      "citationCount": 0,
+      "paperAuthors": [],
+      "paperTopics": [],
+      "journal": null
+    },
+    "order": 6,
+    "score": 1.5
+  },
+  {
+    "name": "DELETE /api/papers/1 – co tac gia → 400",
+    "httpMethod": "DELETE",
+    "urlTemplate": "/api/papers/1",
+    "expectedStatus": 400,
+    "order": 7,
+    "score": 0.5
+  },
+  {
+    "name": "DELETE /api/papers/99 – khong ton tai → 404",
+    "httpMethod": "DELETE",
+    "urlTemplate": "/api/papers/99",
+    "expectedStatus": 404,
+    "order": 8,
+    "score": 0.5
+  },
+  {
+    "name": "DELETE /api/papers/9 – bai bao vua tao, chua co tac gia → 204",
+    "httpMethod": "DELETE",
+    "urlTemplate": "/api/papers/9",
+    "expectedStatus": 204,
+    "order": 9,
+    "score": 1
+  }
+]

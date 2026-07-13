@@ -1,0 +1,61 @@
+[
+  {
+    "name": "Trang danh sách có ô tìm kiếm tên nghiên cứu viên",
+    "httpMethod": "GET",
+    "urlTemplate": "/Researcher",
+    "expectedStatus": 200,
+    "elementId": "ip_researcherName",
+    "order": 1,
+    "score": 0.5
+  },
+  {
+    "name": "Trang danh sách có ô lọc research field",
+    "httpMethod": "GET",
+    "urlTemplate": "/Researcher",
+    "expectedStatus": 200,
+    "elementId": "ip_researchField",
+    "order": 2,
+    "score": 0.5
+  },
+  {
+    "name": "Bảng danh sách hiển thị đủ 5 nghiên cứu viên",
+    "httpMethod": "GET",
+    "urlTemplate": "/Researcher",
+    "expectedStatus": 200,
+    "selector": "table tbody tr",
+    "selectorMinCount": 5,
+    "order": 3,
+    "score": 1
+  },
+  {
+    "name": "Lọc theo tên 'Vinh' → kết quả chứa Bui Quang Vinh",
+    "httpMethod": "GET",
+    "urlTemplate": "/Researcher",
+    "input": { "name": "Vinh" },
+    "expectedStatus": 200,
+    "selector": "table tbody tr",
+    "selectorText": "Vinh",
+    "order": 4,
+    "score": 1
+  },
+  {
+    "name": "Trang chi tiết NCV 1 hiển thị ResearcherId",
+    "httpMethod": "GET",
+    "urlTemplate": "/Researcher/1",
+    "expectedStatus": 200,
+    "elementId": "span_1",
+    "elementText": "1",
+    "order": 5,
+    "score": 1
+  },
+  {
+    "name": "Trang chi tiết NCV 1 hiển thị bảng bài báo (≥ 2 bài báo)",
+    "httpMethod": "GET",
+    "urlTemplate": "/Researcher/1",
+    "expectedStatus": 200,
+    "selector": "table tbody tr",
+    "selectorMinCount": 2,
+    "order": 6,
+    "score": 1
+  }
+]
