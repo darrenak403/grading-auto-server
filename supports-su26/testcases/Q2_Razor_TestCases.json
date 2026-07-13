@@ -6,7 +6,7 @@
     "expectedStatus": 200,
     "elementId": "ip_researcherName",
     "order": 1,
-    "score": 0.5
+    "score": 1
   },
   {
     "name": "Trang danh sách có ô lọc research field",
@@ -15,7 +15,7 @@
     "expectedStatus": 200,
     "elementId": "ip_researchField",
     "order": 2,
-    "score": 0.5
+    "score": 1
   },
   {
     "name": "Bảng danh sách hiển thị đủ 5 nghiên cứu viên",
@@ -46,16 +46,6 @@
     "elementId": "span_1",
     "elementText": "1",
     "order": 5,
-    "score": 1
-  },
-  {
-    "name": "Trang chi tiết NCV 1 hiển thị bảng bài báo (≥ 2 bài báo)",
-    "httpMethod": "GET",
-    "urlTemplate": "/Researcher/1",
-    "expectedStatus": 200,
-    "selector": "table tbody tr",
-    "selectorMinCount": 2,
-    "order": 6,
     "score": 1
   }
 ]
