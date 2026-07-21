@@ -4,7 +4,7 @@ namespace GradingSystem.Application.DTOs;
 
 public record CreateLabAssignmentRequest(string Title, string? Description, Guid? SemesterId = null);
 public record UpdateLabAssignmentRequest(string Title, string? Description, Guid? SemesterId = null);
-public record SyncSupabaseRequest(string? LabId, string? ClassName, string? TermId = null);
+public record SyncSupabaseRequest(string? LabId, string? ClassName, string? TermId = null, string? GradingSessionId = null);
 public record SyncSupabaseGradeRequest(
     string StudentCode,
     string ClassName,
@@ -12,12 +12,14 @@ public record SyncSupabaseGradeRequest(
     decimal Score,
     JsonElement Details,
     string? SourceUrl = null,
-    string? TermId = null);
+    string? TermId = null,
+    string? GradingSessionId = null);
 public record SyncSupabaseGradesRequest(
     string ClassName,
     string LabCode,
     IReadOnlyList<SyncSupabaseGradeItemRequest> Submissions,
-    string? TermId = null);
+    string? TermId = null,
+    string? GradingSessionId = null);
 public record SyncSupabaseGradeItemRequest(
     string StudentCode,
     decimal Score,
@@ -25,9 +27,7 @@ public record SyncSupabaseGradeItemRequest(
     string? SourceUrl = null);
 public record SyncSupabaseGradeResponse(
     string ClassStudentId,
-    string ClassLabId,
-    string ItemType,
-    string? FulfillsRequestId);
+    string GradingSessionId);
 public record SyncSupabaseGradesResponse(
     int Total,
     int SyncedCount,
@@ -37,17 +37,27 @@ public record SyncSupabaseGradesResponse(
 public record SyncSupabaseGradeItemResult(
     string StudentCode,
     string ClassStudentId,
-    string ClassLabId,
-    string ItemType,
-    string? FulfillsRequestId);
+    string GradingSessionId);
 public record SyncSupabaseGradeItemFailure(string StudentCode, string Error);
 public record SupabaseDropdownOptionsDto(
     IReadOnlyList<SupabaseTermOptionDto> Terms,
     IReadOnlyList<SupabaseClassOptionDto> Classes,
-    IReadOnlyList<SupabaseLabOptionDto> Labs);
+    IReadOnlyList<SupabaseLabOptionDto> Labs,
+    IReadOnlyList<SupabaseGradingSessionOptionDto> Sessions);
 public record SupabaseTermOptionDto(string Id, string? Code, string? Name);
 public record SupabaseClassOptionDto(string Name, string? TermId, string? TermCode, string? TermName);
 public record SupabaseLabOptionDto(string Code, string? Title, string? ClassName, string? TermId, string? TermCode, string? TermName, DateTimeOffset? Deadline);
+public record SupabaseGradingSessionOptionDto(
+    string Id,
+    string Name,
+    string Status,
+    DateTimeOffset? Deadline,
+    string ClassName,
+    string LabCode,
+    string? LabTitle,
+    string? TermId,
+    string? TermCode,
+    string? TermName);
 
 public class LabAssignmentDto
 {

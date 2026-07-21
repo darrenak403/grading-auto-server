@@ -6,10 +6,15 @@ Tổng quan: [`README.md`](README.md). FE **repo riêng**.
 
 ```bash
 cp docker/.env.example docker/.env.local   # điền giá trị (xem bên dưới)
+# Trong docker/.env.local, bỏ comment:
+# Playwright__BrowserCdpEndpoint=http://127.0.0.1:9222
 task up                                     # khởi động infra
+task run                                    # Playwright + API + Worker
 ```
 
-Mở 2 terminal:
+`task run` build solution một lần, sau đó chạy API và Worker song song. Chromium chạy nền; nhấn `Ctrl+C` để dừng API/Worker và dùng `task playwright:down` khi không cần Chromium nữa.
+
+Nếu cần debug từng ứng dụng ở terminal riêng:
 
 ```bash
 task api      # terminal 1 — API
@@ -27,10 +32,13 @@ RabbitMQ: http://localhost:15672
 | Lệnh | Mô tả |
 |------|--------|
 | `task up` | Khởi động infra (Postgres, SQL Server, RabbitMQ, pgWeb) |
+| `task run` | Khởi động Playwright, build solution, chạy API và Worker song song |
 | `task down` | Tắt infra |
 | `task logs` | Xem log infra |
 | `task api` | Chạy API — `dotnet run` |
 | `task worker` | Chạy Worker — `dotnet run` |
+| `task playwright:up` | Khởi động Chromium CDP |
+| `task playwright:down` | Tắt Chromium CDP |
 
 ---
 
@@ -42,9 +50,11 @@ Copy từ `docker/.env.example` rồi điền:
 |------|---------|-------|--------|
 | `POSTGRES_PASSWORD` | Mật khẩu Postgres | `postgres` | |
 | `POSTGRES_PUBLISH_PORT` | Port Postgres ra host | `5439` | Phải khớp với connection string |
-| `MSSQL_SA_PASSWORD` | Mật khẩu SQL Server | `YourStr0ng!Pass` | |
+| `SA_PASSWORD` | Mật khẩu SQL Server | `YourStr0ng!Pass` | |
 | `RABBITMQ_USER` | RabbitMQ username | `guest` | |
-| `RABBITMQ_PASS` | RabbitMQ password | `guest` | |
+| `RABBITMQ_PASSWORD` | RabbitMQ password | `guest` | |
+| `PLAYWRIGHT_CDP_PORT` | Port Chromium CDP | `9222` | Dùng khi chạy `task run` |
+| `Playwright__BrowserCdpEndpoint` | Endpoint Chromium cho Worker | `http://127.0.0.1:9222` | Bỏ comment để chấm câu Razor qua Playwright |
 | `WORKER_MAX_CONCURRENT_JOBS` | Số job chấm song song (PE) | `3` (mặc định: auto từ CPU) | Nếu không đặt → `Math.Clamp(CoreCount - 1, 1, 8)` |
 | `WORKER_SUBMISSION_TIMEOUT_SECONDS` | Timeout per bài (giây) | `90` | Vượt quá → kill process, mark Failed |
 

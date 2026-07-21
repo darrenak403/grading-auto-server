@@ -18,8 +18,7 @@ tasks:
         echo "Setup lần đầu:"
         echo "  1. cp docker/.env.example docker/.env.local  (rồi điền giá trị)"
         echo "  2. task up"
-        echo "  3. task api   (terminal 1)"
-        echo "  4. task worker  (terminal 2)"
+        echo "  3. task run   (Playwright + API + Worker)"
         echo ""
         echo "Chấm PE câu Razor (cần Playwright):"
         echo "  1. task playwright:up   (bật Chromium CDP, tách riêng khỏi task up)"
@@ -80,6 +79,14 @@ tasks:
       - dotnet build GradingSystem.Api/GradingSystem.Api.csproj
       - dotnet ef database update --no-build --project GradingSystem.Infrastructure --startup-project GradingSystem.Api
 
+  run:
+    desc: Chạy Playwright, API và Worker
+    deps: [_env]
+    cmds:
+      - task: playwright:up
+      - dotnet build Project.sln -m:1
+      - task: _apps:run
+
   api:
     desc: Chạy API — http://localhost:5049/swagger
     dir: '{{.API_DIR}}'
@@ -90,7 +97,7 @@ tasks:
       ASPNETCORE_URLS: http://localhost:5049
     cmds:
       - dotnet build -m:1
-      - dotnet run --no-build --no-restore
+      - task: _api:run
 
   worker:
     desc: Chạy Worker (grading background service)
@@ -101,7 +108,30 @@ tasks:
       ASPNETCORE_ENVIRONMENT: Development
     cmds:
       - dotnet build -m:1
-      - dotnet run --no-build --no-restore
+      - task: _worker:run
+
+  _api:run:
+    internal: true
+    dir: '{{.API_DIR}}'
+    interactive: true
+    dotenv: ['../docker/.env.local']
+    env:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://localhost:5049
+    cmd: dotnet run --no-build --no-restore
+
+  _worker:run:
+    internal: true
+    dir: '{{.WORKER_DIR}}'
+    interactive: true
+    dotenv: ['../docker/.env.local']
+    env:
+      ASPNETCORE_ENVIRONMENT: Development
+    cmd: dotnet run --no-build --no-restore
+
+  _apps:run:
+    internal: true
+    deps: [_api:run, _worker:run]
 
   _env:
     internal: true

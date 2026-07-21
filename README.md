@@ -2,12 +2,25 @@
 
 Hệ thống chấm thi tự động cho môn PRN232 (ASP.NET). Hỗ trợ **Q1** (SQL/Stored Procedures) và **Q2** (ASP.NET Razor API). Chấm bài bất đồng bộ qua RabbitMQ.
 
-**Chạy backend:** xem [`BE.md`](BE.md).
+## Chạy nhanh backend
+
+```bash
+cp docker/.env.example docker/.env.local   # lần đầu: tạo cấu hình local
+# Trong docker/.env.local, bỏ comment:
+# Playwright__BrowserCdpEndpoint=http://127.0.0.1:9222
+task up                                     # khởi động hạ tầng
+task run                                    # Playwright + API + Worker
+```
+
+Swagger: http://localhost:5049/swagger
+
+Chi tiết cấu hình và các lệnh chạy riêng: [`BE.md`](BE.md).
 
 ---
 
 ## Mục lục
 
+- [Chạy nhanh backend](#chạy-nhanh-backend)
 - [Kiến trúc](#kiến-trúc)
 - [Tech stack](#tech-stack)
 - [Cấu trúc repo](#cấu-trúc-repo)

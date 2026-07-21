@@ -36,6 +36,7 @@ public class SupabaseSyncService : ISupabaseSyncService
         string? labIdOverride = null,
         string? classNameOverride = null,
         string? termId = null,
+        string? gradingSessionId = null,
         CancellationToken ct = default)
     {
         EnsureSupabaseConfigured();
@@ -128,16 +129,17 @@ public class SupabaseSyncService : ISupabaseSyncService
             details,
             sourceUrl: null,
             termId,
+            gradingSessionId,
             ct);
 
         _logger.LogInformation(
-            "Successfully synced submission {SubmissionId} ({StudentCode}) to Supabase class_lab_submissions as {ItemType}",
+            "Successfully synced submission {SubmissionId} ({StudentCode}) to Supabase session_submissions for grading session {GradingSessionId}",
             submissionId,
             studentCode,
-            syncResult.ItemType);
+            syncResult.GradingSessionId);
     }
 
-    public async Task<SupabaseDropdownOptionsDto> GetDropdownOptionsAsync(string? termId = null, string? className = null, CancellationToken ct = default)
+    public async Task<SupabaseDropdownOptionsDto> GetDropdownOptionsAsync(string? termId = null, string? className = null, string? labCode = null, CancellationToken ct = default)
     {
         EnsureSupabaseConfigured();
 
@@ -145,12 +147,27 @@ public class SupabaseSyncService : ISupabaseSyncService
         var normalizedClassName = string.IsNullOrWhiteSpace(className)
             ? null
             : NormalizeSupabaseKey(className);
+        var normalizedLabCode = string.IsNullOrWhiteSpace(labCode)
+            ? null
+            : NormalizeSupabaseKey(labCode);
 
         var terms = await GetTermOptionsAsync(ct);
         var classes = await GetClassOptionsAsync(normalizedTermId, ct);
-        var labs = await GetLabOptionsAsync(normalizedTermId, normalizedClassName, ct);
+        var sessions = await GetGradingSessionOptionsAsync(normalizedTermId, normalizedClassName, normalizedLabCode, ct);
+        var labs = sessions
+            .GroupBy(option => $"{option.TermId}|{option.ClassName}|{option.LabCode}", StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.OrderByDescending(option => option.Status == "open").First())
+            .Select(option => new SupabaseLabOptionDto(
+                option.LabCode,
+                option.LabTitle,
+                option.ClassName,
+                option.TermId,
+                option.TermCode,
+                option.TermName,
+                option.Deadline))
+            .ToList();
 
-        return new SupabaseDropdownOptionsDto(terms, classes, labs);
+        return new SupabaseDropdownOptionsDto(terms, classes, labs, sessions);
     }
 
     public async Task<int> SyncAssignmentAsync(Guid assignmentId, SyncSupabaseRequest? request = null, CancellationToken ct = default)
@@ -169,7 +186,7 @@ public class SupabaseSyncService : ISupabaseSyncService
         {
             try
             {
-                await SyncSubmissionAsync(sub.Id, request?.LabId, request?.ClassName, request?.TermId, ct);
+                await SyncSubmissionAsync(sub.Id, request?.LabId, request?.ClassName, request?.TermId, request?.GradingSessionId, ct);
                 syncedCount++;
             }
             catch (Exception ex)
@@ -199,6 +216,7 @@ public class SupabaseSyncService : ISupabaseSyncService
             request.Details,
             request.SourceUrl,
             request.TermId,
+            request.GradingSessionId,
             ct);
     }
 
@@ -244,14 +262,13 @@ public class SupabaseSyncService : ISupabaseSyncService
                     item.Details,
                     item.SourceUrl,
                     termId,
+                    request.GradingSessionId,
                     ct);
 
                 synced.Add(new SyncSupabaseGradeItemResult(
                     studentCode,
                     result.ClassStudentId,
-                    result.ClassLabId,
-                    result.ItemType,
-                    result.FulfillsRequestId));
+                    result.GradingSessionId));
             }
             catch (Exception ex)
             {
@@ -274,7 +291,6 @@ public class SupabaseSyncService : ISupabaseSyncService
         {
             var normalizedStudentId = NormalizeSupabaseKey(studentId);
 
-            // 1. Tra cứu schema ERD mới.
             var classStudentRequest = new HttpRequestMessage(
                 HttpMethod.Get,
                 $"rest/v1/class_students?select=classes!inner(name),students!inner(student_code)&students.student_code=eq.{EscapeFilterValue(normalizedStudentId)}&limit=1");
@@ -299,7 +315,6 @@ public class SupabaseSyncService : ISupabaseSyncService
                 }
             }
 
-            // 2. Tra cứu bảng cũ để tương thích dữ liệu legacy.
             var request = new HttpRequestMessage(HttpMethod.Get, $"rest/v1/allowed_emails?student_id=eq.{studentId}&select=class_name");
             request.Headers.Add("apikey", _options.ServiceRoleKey);
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _options.ServiceRoleKey);
@@ -320,7 +335,6 @@ public class SupabaseSyncService : ISupabaseSyncService
                 }
             }
 
-            // 3. Tra cứu bảng students cũ.
             var requestStd = new HttpRequestMessage(HttpMethod.Get, $"rest/v1/students?student_id=eq.{studentId}&select=class_name");
             requestStd.Headers.Add("apikey", _options.ServiceRoleKey);
             requestStd.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _options.ServiceRoleKey);
@@ -389,66 +403,27 @@ public class SupabaseSyncService : ISupabaseSyncService
         object details,
         string? sourceUrl,
         string? termId,
+        string? gradingSessionId,
         CancellationToken ct)
     {
         var normalizedTermId = NormalizeNullableSupabaseKey(termId);
         var classStudentId = await GetRequiredClassStudentIdAsync(studentCode, className, normalizedTermId, ct);
-        var classLab = await GetRequiredClassLabAsync(labCode, className, normalizedTermId, ct);
-        var approvedRequestId = await GetApprovedResubmissionRequestIdAsync(classStudentId, classLab.Id, ct);
-        var itemType = DetermineItemType(approvedRequestId, classLab.Deadline);
+        var sessionId = await GetRequiredGradingSessionIdAsync(
+            labCode,
+            className,
+            normalizedTermId,
+            gradingSessionId,
+            ct);
 
-        await CreateClassLabSubmissionAsync(
+        await CreateSessionSubmissionAsync(
             classStudentId,
-            classLab.Id,
-            itemType,
+            sessionId,
             score,
             details,
             sourceUrl,
-            approvedRequestId,
             ct);
 
-        if (!string.IsNullOrEmpty(approvedRequestId))
-        {
-            await CompleteResubmissionRequestAsync(approvedRequestId, ct);
-        }
-
-        return new SyncSupabaseGradeResponse(classStudentId, classLab.Id, itemType, approvedRequestId);
-    }
-
-    private async Task CompleteResubmissionRequestAsync(string requestId, CancellationToken ct)
-    {
-        try
-        {
-            var patchUrl = $"rest/v1/resubmission_requests_v2?id=eq.{EscapeFilterValue(requestId)}&status=eq.approved";
-            var now = DateTime.UtcNow;
-            var patchPayload = new
-            {
-                status = "completed",
-                completed_at = now,
-                updated_at = now
-            };
-
-            var patchRequest = new HttpRequestMessage(HttpMethod.Patch, patchUrl)
-            {
-                Content = JsonContent.Create(patchPayload)
-            };
-            AddSupabaseAuthHeaders(patchRequest);
-
-            var patchResponse = await _client.SendAsync(patchRequest, ct);
-            if (!patchResponse.IsSuccessStatusCode)
-            {
-                var errContent = await patchResponse.Content.ReadAsStringAsync(ct);
-                _logger.LogError("Failed to update resubmission request {RequestId} to completed: {StatusCode} - {Error}", requestId, patchResponse.StatusCode, errContent);
-            }
-            else
-            {
-                _logger.LogInformation("Successfully marked resubmission request v2 {RequestId} as completed", requestId);
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error while updating resubmission request {RequestId} to completed", requestId);
-        }
+        return new SyncSupabaseGradeResponse(classStudentId, sessionId);
     }
 
     private async Task<IReadOnlyList<SupabaseTermOptionDto>> GetTermOptionsAsync(CancellationToken ct)
@@ -518,10 +493,14 @@ public class SupabaseSyncService : ISupabaseSyncService
             .ToList();
     }
 
-    private async Task<IReadOnlyList<SupabaseLabOptionDto>> GetLabOptionsAsync(string? termId, string? className, CancellationToken ct)
+    private async Task<IReadOnlyList<SupabaseGradingSessionOptionDto>> GetGradingSessionOptionsAsync(
+        string? termId,
+        string? className,
+        string? labCode,
+        CancellationToken ct)
     {
-        var url = "rest/v1/class_labs"
-            + "?select=deadline,labs!inner(code),classes!inner(name,terms!inner(id,name))";
+        var url = "rest/v1/grading_sessions"
+            + "?select=id,name,status,deadline,labs!inner(code,title),classes!inner(name,terms!inner(id,name))";
 
         if (!string.IsNullOrWhiteSpace(termId))
         {
@@ -531,6 +510,10 @@ public class SupabaseSyncService : ISupabaseSyncService
         {
             url += $"&classes.name=eq.{EscapeFilterValue(className)}";
         }
+        if (!string.IsNullOrWhiteSpace(labCode))
+        {
+            url += $"&labs.code=eq.{EscapeFilterValue(labCode)}";
+        }
 
         var request = new HttpRequestMessage(HttpMethod.Get, url);
         AddSupabaseAuthHeaders(request);
@@ -539,7 +522,7 @@ public class SupabaseSyncService : ISupabaseSyncService
         if (!response.IsSuccessStatusCode)
         {
             var errorContent = await response.Content.ReadAsStringAsync(ct);
-            throw new Exception($"Failed to query Supabase class labs: {response.StatusCode} - {errorContent}");
+            throw new Exception($"Failed to query Supabase grading sessions: {response.StatusCode} - {errorContent}");
         }
 
         var json = await response.Content.ReadAsStringAsync(ct);
@@ -550,14 +533,14 @@ public class SupabaseSyncService : ISupabaseSyncService
         }
 
         return doc.RootElement.EnumerateArray()
-            .Select(ParseLabOption)
+            .Select(ParseGradingSessionOption)
             .Where(option => option is not null)
             .Select(option => option!)
-            .GroupBy(option => $"{option.TermId}|{option.ClassName}|{option.Code}", StringComparer.OrdinalIgnoreCase)
-            .Select(group => group.First())
             .OrderBy(option => option.TermCode ?? option.TermName ?? option.TermId)
             .ThenBy(option => option.ClassName)
-            .ThenBy(option => option.Code)
+            .ThenBy(option => option.LabCode)
+            .ThenByDescending(option => option.Status == "open")
+            .ThenBy(option => option.Name)
             .ToList();
     }
 
@@ -586,17 +569,27 @@ public class SupabaseSyncService : ISupabaseSyncService
         return idProp.GetString()!;
     }
 
-    private async Task<ClassLabRef> GetRequiredClassLabAsync(string labCode, string className, string? termId, CancellationToken ct)
+    private async Task<string> GetRequiredGradingSessionIdAsync(
+        string labCode,
+        string className,
+        string? termId,
+        string? gradingSessionId,
+        CancellationToken ct)
     {
-        var url = "rest/v1/class_labs"
-            + "?select=id,deadline,labs!inner(code),"
+        var url = "rest/v1/grading_sessions"
+            + "?select=id,labs!inner(code),"
             + (string.IsNullOrWhiteSpace(termId)
                 ? "classes!inner(name)"
                 : "classes!inner(name,terms!inner(id))")
+            + "&status=eq.open"
             + $"&labs.code=eq.{EscapeFilterValue(labCode)}"
             + $"&classes.name=eq.{EscapeFilterValue(className)}"
             + "&limit=1";
 
+        if (!string.IsNullOrWhiteSpace(gradingSessionId))
+        {
+            url += $"&id=eq.{EscapeFilterValue(gradingSessionId.Trim())}";
+        }
         if (!string.IsNullOrWhiteSpace(termId))
         {
             url += $"&classes.terms.id=eq.{EscapeFilterValue(termId)}";
@@ -605,62 +598,33 @@ public class SupabaseSyncService : ISupabaseSyncService
         var element = await GetFirstArrayElementAsync(url, ct);
         if (element is null || !element.Value.TryGetProperty("id", out var idProp) || idProp.ValueKind != JsonValueKind.String)
         {
-            throw new NotFoundException($"Supabase class_lab not found for lab '{labCode}' in class '{className}'{FormatTermError(termId)}.");
+            var sessionDescription = string.IsNullOrWhiteSpace(gradingSessionId)
+                ? "an open grading session"
+                : $"open grading session '{gradingSessionId.Trim()}'";
+            throw new NotFoundException($"Supabase {sessionDescription} not found for lab '{labCode}' in class '{className}'{FormatTermError(termId)}.");
         }
 
-        DateTimeOffset? deadline = null;
-        if (element.Value.TryGetProperty("deadline", out var deadlineProp) &&
-            deadlineProp.ValueKind == JsonValueKind.String &&
-            DateTimeOffset.TryParse(deadlineProp.GetString(), out var parsedDeadline))
-        {
-            deadline = parsedDeadline;
-        }
-
-        return new ClassLabRef(idProp.GetString()!, deadline);
+        return idProp.GetString()!;
     }
 
-    private async Task<string?> GetApprovedResubmissionRequestIdAsync(string classStudentId, string classLabId, CancellationToken ct)
-    {
-        var url = "rest/v1/resubmission_requests_v2"
-            + "?select=id"
-            + $"&class_student_id=eq.{EscapeFilterValue(classStudentId)}"
-            + $"&class_lab_id=eq.{EscapeFilterValue(classLabId)}"
-            + "&status=eq.approved"
-            + "&created_submission_id=is.null"
-            + "&order=updated_at.desc"
-            + "&limit=1";
-
-        var element = await GetFirstArrayElementAsync(url, ct);
-        if (element is not null && element.Value.TryGetProperty("id", out var idProp) && idProp.ValueKind == JsonValueKind.String)
-        {
-            return idProp.GetString();
-        }
-
-        return null;
-    }
-
-    private async Task CreateClassLabSubmissionAsync(
+    private async Task CreateSessionSubmissionAsync(
         string classStudentId,
-        string classLabId,
-        string itemType,
+        string gradingSessionId,
         decimal score,
         object details,
         string? sourceUrl,
-        string? fulfillsRequestId,
         CancellationToken ct)
     {
         var payload = new
         {
             p_class_student_id = classStudentId,
-            p_class_lab_id = classLabId,
-            p_item_type = itemType,
+            p_grading_session_id = gradingSessionId,
             p_source_url = sourceUrl,
             p_score = score,
-            p_details = details,
-            p_fulfills_request_id = fulfillsRequestId
+            p_details = details
         };
 
-        var request = new HttpRequestMessage(HttpMethod.Post, "rest/v1/rpc/create_class_lab_submission")
+        var request = new HttpRequestMessage(HttpMethod.Post, "rest/v1/rpc/create_session_submission")
         {
             Content = JsonContent.Create(payload)
         };
@@ -670,7 +634,7 @@ public class SupabaseSyncService : ISupabaseSyncService
         if (!response.IsSuccessStatusCode)
         {
             var errorContent = await response.Content.ReadAsStringAsync(ct);
-            throw new BadRequestException($"Failed to create Supabase class_lab_submission: {response.StatusCode} - {errorContent}");
+            throw new BadRequestException($"Failed to create Supabase session_submission: {response.StatusCode} - {errorContent}");
         }
     }
 
@@ -694,18 +658,6 @@ public class SupabaseSyncService : ISupabaseSyncService
         }
 
         return doc.RootElement[0].Clone();
-    }
-
-    private static string DetermineItemType(string? approvedRequestId, DateTimeOffset? deadline)
-    {
-        if (!string.IsNullOrEmpty(approvedRequestId))
-        {
-            return "resubmit";
-        }
-
-        return deadline.HasValue && DateTimeOffset.UtcNow > deadline.Value.ToUniversalTime()
-            ? "late"
-            : "original";
     }
 
     private void AddSupabaseAuthHeaders(HttpRequestMessage request)
@@ -751,9 +703,18 @@ public class SupabaseSyncService : ISupabaseSyncService
         return new SupabaseClassOptionDto(className, term?.Id, term?.Code, term?.Name);
     }
 
-    private static SupabaseLabOptionDto? ParseLabOption(JsonElement item)
+    private static SupabaseGradingSessionOptionDto? ParseGradingSessionOption(JsonElement item)
     {
-        if (!item.TryGetProperty("labs", out var labProp) ||
+        if (!item.TryGetProperty("id", out var idProp) ||
+            idProp.ValueKind != JsonValueKind.String ||
+            string.IsNullOrWhiteSpace(idProp.GetString()) ||
+            !item.TryGetProperty("name", out var nameProp) ||
+            nameProp.ValueKind != JsonValueKind.String ||
+            string.IsNullOrWhiteSpace(nameProp.GetString()) ||
+            !item.TryGetProperty("status", out var statusProp) ||
+            statusProp.ValueKind != JsonValueKind.String ||
+            string.IsNullOrWhiteSpace(statusProp.GetString()) ||
+            !item.TryGetProperty("labs", out var labProp) ||
             labProp.ValueKind != JsonValueKind.Object ||
             !labProp.TryGetProperty("code", out var codeProp) ||
             codeProp.ValueKind != JsonValueKind.String ||
@@ -762,19 +723,16 @@ public class SupabaseSyncService : ISupabaseSyncService
             return null;
         }
 
-        string? className = null;
-        if (item.TryGetProperty("classes", out var classProp) &&
-            classProp.ValueKind == JsonValueKind.Object &&
-            classProp.TryGetProperty("name", out var classNameProp) &&
-            classNameProp.ValueKind == JsonValueKind.String)
+        if (!item.TryGetProperty("classes", out var classProp) ||
+            classProp.ValueKind != JsonValueKind.Object ||
+            !classProp.TryGetProperty("name", out var classNameProp) ||
+            classNameProp.ValueKind != JsonValueKind.String ||
+            string.IsNullOrWhiteSpace(classNameProp.GetString()))
         {
-            className = classNameProp.GetString();
+            return null;
         }
 
-        var term = item.TryGetProperty("classes", out var nestedClassProp) &&
-            nestedClassProp.ValueKind == JsonValueKind.Object
-            ? ParseNestedTerm(nestedClassProp)
-            : null;
+        var term = ParseNestedTerm(classProp);
 
         DateTimeOffset? deadline = null;
         if (item.TryGetProperty("deadline", out var deadlineProp) &&
@@ -784,7 +742,17 @@ public class SupabaseSyncService : ISupabaseSyncService
             deadline = parsedDeadline;
         }
 
-        return new SupabaseLabOptionDto(codeProp.GetString()!, null, className, term?.Id, term?.Code, term?.Name, deadline);
+        return new SupabaseGradingSessionOptionDto(
+            idProp.GetString()!,
+            nameProp.GetString()!,
+            statusProp.GetString()!,
+            deadline,
+            classNameProp.GetString()!,
+            codeProp.GetString()!,
+            GetOptionalString(labProp, "title"),
+            term?.Id,
+            term?.Code,
+            term?.Name);
     }
 
     private static string NormalizeSupabaseKey(string? value) => (value ?? "").Trim().ToUpperInvariant();
@@ -815,8 +783,6 @@ public class SupabaseSyncService : ISupabaseSyncService
             ? prop.GetString()
             : null;
     }
-
-    private record ClassLabRef(string Id, DateTimeOffset? Deadline);
 
     private class SupabaseDetailsDto
     {

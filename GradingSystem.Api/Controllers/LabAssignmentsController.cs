@@ -21,9 +21,10 @@ public class LabAssignmentsController(
         [FromServices] ISupabaseSyncService supabaseSyncService,
         [FromQuery] string? termId,
         [FromQuery] string? className,
+        [FromQuery] string? labCode,
         CancellationToken ct)
     {
-        var result = await supabaseSyncService.GetDropdownOptionsAsync(termId, className, ct);
+        var result = await supabaseSyncService.GetDropdownOptionsAsync(termId, className, labCode, ct);
         return Ok(result);
     }
 
