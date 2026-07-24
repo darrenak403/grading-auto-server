@@ -32,6 +32,7 @@ public record SyncSupabaseGradesResponse(
     int Total,
     int SyncedCount,
     int FailedCount,
+    int BackfilledCount,
     IReadOnlyList<SyncSupabaseGradeItemResult> Synced,
     IReadOnlyList<SyncSupabaseGradeItemFailure> Failed);
 public record SyncSupabaseGradeItemResult(

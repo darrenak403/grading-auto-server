@@ -5,6 +5,7 @@ using GradingSystem.Application.Interfaces;
 using GradingSystem.Application.Messaging;
 using GradingSystem.Domain.Entities;
 using MassTransit;
+using System.Text.Json;
 
 namespace GradingSystem.Application.Services;
 
@@ -88,6 +89,127 @@ public class SubmissionService(IUnitOfWork uow, IPublishEndpoint publishEndpoint
         return results
             .OrderBy(r => r.CreatedAt)
             .Select(r => MapResult(r, submission.StudentCode));
+    }
+
+    public async Task<IReadOnlyList<QuestionResultDto>> ImportCustomResultAsync(
+        Guid submissionId,
+        ImportCustomResultRequest request,
+        CancellationToken ct = default)
+    {
+        var target = await uow.Submissions.GetByIdAsync(submissionId)
+            ?? throw new NotFoundException($"Submission '{submissionId}' not found.");
+        var template = await uow.Submissions.GetByIdAsync(request.TemplateSubmissionId)
+            ?? throw new NotFoundException($"Template submission '{request.TemplateSubmissionId}' not found.");
+
+        if (target.Id == template.Id)
+            throw new BadRequestException("Template submission must be different from the target submission.");
+        if (target.AssignmentId != template.AssignmentId)
+            throw new BadRequestException("Template and target submissions must belong to the same assignment.");
+        if (string.IsNullOrWhiteSpace(request.Reason))
+            throw new BadRequestException("Reason is required.");
+
+        var activeJobs = await uow.GradingJobs.FindAsync(j =>
+            j.SubmissionId == target.Id && (j.Status == JobStatus.Pending || j.Status == JobStatus.Running));
+        if (activeJobs.Any())
+            throw new BadRequestException("Submission is already being graded.");
+
+        var templateResults = await GetLatestCompletedResultsAsync(template.Id);
+        if (templateResults.Count == 0)
+            throw new BadRequestException("Template submission has no completed results.");
+
+        var maxScore = templateResults.Sum(r => r.MaxScore);
+        var templateScore = templateResults.Sum(r => r.FinalScore);
+        if (maxScore <= 0 || templateScore != maxScore)
+            throw new BadRequestException("Template submission must have a full-score result.");
+        if (request.Score < 0 || request.Score > maxScore)
+            throw new BadRequestException($"Score must be in range [0..{maxScore}].");
+
+        var staleResults = await uow.QuestionResults.FindAsync(r => r.SubmissionId == target.Id);
+        foreach (var stale in staleResults)
+            uow.QuestionResults.Remove(stale);
+
+        var now = DateTime.UtcNow;
+        var customJob = new GradingJob
+        {
+            SubmissionId = target.Id,
+            GradingRound = target.GradingRound,
+            Status = JobStatus.Done,
+            StartedAt = now,
+            FinishedAt = now,
+        };
+        await uow.GradingJobs.AddAsync(customJob);
+
+        var scale = request.Score / maxScore;
+        var created = new List<QuestionResult>();
+        foreach (var source in templateResults)
+        {
+            var result = new QuestionResult
+            {
+                SubmissionId = target.Id,
+                GradingJobId = customJob.Id,
+                QuestionId = source.QuestionId,
+                Score = decimal.Round(source.MaxScore * scale, 2, MidpointRounding.AwayFromZero),
+                MaxScore = source.MaxScore,
+                Detail = ScaleDetail(source.Detail, scale),
+                AdjustedScore = decimal.Round(source.MaxScore * scale, 2, MidpointRounding.AwayFromZero),
+                AdjustReason = request.Reason.Trim(),
+                AdjustedBy = request.AdjustedBy?.Trim(),
+                AdjustedAt = now,
+            };
+            await uow.QuestionResults.AddAsync(result);
+            created.Add(result);
+        }
+
+        var roundingDelta = request.Score - created.Sum(r => r.FinalScore);
+        if (roundingDelta != 0)
+        {
+            var last = created[^1];
+            last.Score += roundingDelta;
+            last.AdjustedScore = last.Score;
+        }
+
+        target.Status = SubmissionStatus.Done;
+        uow.Submissions.Update(target);
+        await uow.SaveChangesAsync(ct);
+
+        return created.Select(r => MapResult(r, target.StudentCode)).ToList();
+    }
+
+    private async Task<List<QuestionResult>> GetLatestCompletedResultsAsync(Guid submissionId)
+    {
+        var latestJob = (await uow.GradingJobs.FindAsync(
+                j => j.SubmissionId == submissionId && j.Status == JobStatus.Done))
+            .OrderByDescending(j => j.FinishedAt ?? j.CreatedAt)
+            .ThenByDescending(j => j.Id)
+            .FirstOrDefault();
+
+        var results = latestJob is null
+            ? await uow.QuestionResults.FindAsync(
+                r => r.SubmissionId == submissionId && r.GradingJobId == null)
+            : await uow.QuestionResults.FindAsync(
+                r => r.SubmissionId == submissionId && r.GradingJobId == latestJob.Id);
+        return results.OrderBy(r => r.CreatedAt).ToList();
+    }
+
+    private static string? ScaleDetail(string? detail, decimal scale)
+    {
+        if (string.IsNullOrWhiteSpace(detail)) return detail;
+
+        List<TestCaseResult>? testCases;
+        try
+        {
+            testCases = JsonSerializer.Deserialize<List<TestCaseResult>>(detail, _jsonOpts);
+        }
+        catch (JsonException)
+        {
+            throw new BadRequestException("Template submission contains invalid test-case result data.");
+        }
+
+        if (testCases is null) return detail;
+        foreach (var testCase in testCases)
+            testCase.AwardedScore = decimal.Round(
+                testCase.AwardedScore * scale, 2, MidpointRounding.AwayFromZero);
+        return JsonSerializer.Serialize(testCases, _jsonOpts);
     }
 
     public async Task<SubmissionDto> DeleteAsync(Guid submissionId, CancellationToken ct = default)
@@ -182,8 +304,8 @@ public class SubmissionService(IUnitOfWork uow, IPublishEndpoint publishEndpoint
         LatestJobStatus = latestJobStatus,
     };
 
-    private static readonly System.Text.Json.JsonSerializerOptions _jsonOpts =
-        new(System.Text.Json.JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions _jsonOpts =
+        new(JsonSerializerDefaults.Web);
 
     private static QuestionResultDto MapResult(QuestionResult r, string studentCode) => new()
     {
@@ -197,7 +319,7 @@ public class SubmissionService(IUnitOfWork uow, IPublishEndpoint publishEndpoint
         FinalScore    = r.FinalScore,
         TestCaseResults = string.IsNullOrEmpty(r.Detail)
             ? null
-            : System.Text.Json.JsonSerializer.Deserialize<List<Common.TestCaseResult>>(r.Detail, _jsonOpts),
+            : JsonSerializer.Deserialize<List<Common.TestCaseResult>>(r.Detail, _jsonOpts),
         AdjustedScore = r.AdjustedScore,
         AdjustReason  = r.AdjustReason,
         AdjustedBy    = r.AdjustedBy,

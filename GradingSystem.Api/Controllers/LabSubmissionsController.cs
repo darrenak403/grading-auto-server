@@ -113,6 +113,13 @@ public class LabSubmissionsController(
         return Ok(result, "Score adjusted.");
     }
 
+    [HttpPut("lab-submissions/{id:guid}/custom-result")]
+    public async Task<IActionResult> ImportCustomResultAsync(Guid id, [FromBody] ImportLabCustomResultRequest req, CancellationToken ct)
+    {
+        var result = await resultService.ImportCustomResultAsync(id, req, ct);
+        return Ok(result, "Custom result imported.");
+    }
+
     [HttpDelete("lab-submissions/{id:guid}")]
     public async Task<IActionResult> DeleteAsync(Guid id, CancellationToken ct)
     {

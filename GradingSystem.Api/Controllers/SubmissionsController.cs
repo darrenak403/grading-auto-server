@@ -40,6 +40,16 @@ public class SubmissionsController(
         return Ok(results);
     }
 
+    [HttpPut("submissions/{id:guid}/custom-result")]
+    public async Task<IActionResult> ImportCustomResultAsync(
+        Guid id,
+        [FromBody] ImportCustomResultRequest req,
+        CancellationToken ct)
+    {
+        var results = await submissionService.ImportCustomResultAsync(id, req, ct);
+        return Ok(results, "Custom result imported.");
+    }
+
     [HttpPut("submissions/{id:guid}/notes")]
     public async Task<IActionResult> UpsertNoteAsync(Guid id, [FromBody] UpdateReviewNoteRequest req, CancellationToken ct)
     {

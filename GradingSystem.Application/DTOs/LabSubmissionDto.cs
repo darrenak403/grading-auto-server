@@ -1,6 +1,7 @@
 namespace GradingSystem.Application.DTOs;
 
 public record AdjustLabScoreRequest(Guid ResultId, decimal Score, string Reason);
+public record ImportLabCustomResultRequest(Guid? TemplateSubmissionId, decimal Score, string Reason);
 public record LabUploadFile(string FileName, Stream Content);
 
 public class LabSubmissionDto

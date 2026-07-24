@@ -1,10 +1,13 @@
 using GradingSystem.Application.Exceptions;
+using GradingSystem.Application.DTOs;
+using GradingSystem.Application.Common;
 using GradingSystem.Application.Messaging;
 using GradingSystem.Application.Services;
 using GradingSystem.Domain.Entities;
 using GradingSystem.Tests.Fakes;
 using MassTransit;
 using Moq;
+using System.Text.Json;
 
 namespace GradingSystem.Tests.Application.Services;
 
@@ -211,5 +214,307 @@ public class SubmissionServiceTests
         Assert.Single(round2Results);
         Assert.Equal("Round 2", round2Results[0].GradingRound);
         Assert.Equal(2, allResults.Count);
+    }
+
+    [Fact]
+    public async Task ImportCustomResultAsync_ClonesFullScoreTemplateAndScalesToRequestedScore()
+    {
+        var (svc, uow, _) = CreateSut();
+        var assignmentId = Guid.NewGuid();
+        var template = MakeSubmission();
+        var target = MakeSubmission();
+        template.AssignmentId = assignmentId;
+        target.AssignmentId = assignmentId;
+        uow.SubmissionsRepo.Items.AddRange([template, target]);
+
+        var templateJob = new GradingJob
+        {
+            SubmissionId = template.Id,
+            Status = JobStatus.Done,
+            FinishedAt = DateTime.UtcNow,
+        };
+        uow.GradingJobsRepo.Items.Add(templateJob);
+        uow.QuestionResultsRepo.Items.Add(new QuestionResult
+        {
+            SubmissionId = template.Id,
+            GradingJobId = templateJob.Id,
+            QuestionId = Guid.NewGuid(),
+            Score = 10,
+            MaxScore = 10,
+            Detail = JsonSerializer.Serialize(new List<TestCaseResult>
+            {
+                new() { TestCaseId = Guid.NewGuid(), Pass = true, AwardedScore = 10 },
+            }),
+        });
+
+        var results = await svc.ImportCustomResultAsync(target.Id, new ImportCustomResultRequest
+        {
+            TemplateSubmissionId = template.Id,
+            Score = 8,
+            Reason = "Custom score",
+            AdjustedBy = "lecturer",
+        });
+
+        var result = Assert.Single(results);
+        Assert.Equal(8, result.FinalScore);
+        Assert.Equal(10, result.MaxScore);
+        Assert.Equal(8, Assert.Single(result.TestCaseResults!).AwardedScore);
+        Assert.Equal("Custom score", result.AdjustReason);
+        Assert.Equal(SubmissionStatus.Done, target.Status);
+        Assert.Single(uow.GradingJobsRepo.Items, j =>
+            j.SubmissionId == target.Id && j.Status == JobStatus.Done);
+        Assert.Equal(1, uow.SaveChangesCallCount);
+    }
+
+    [Fact]
+    public async Task ImportCustomResultAsync_UsesLatestCompletedTemplateJob()
+    {
+        var (svc, uow, _) = CreateSut();
+        var assignmentId = Guid.NewGuid();
+        var template = MakeSubmission();
+        var target = MakeSubmission();
+        template.AssignmentId = assignmentId;
+        target.AssignmentId = assignmentId;
+        uow.SubmissionsRepo.Items.AddRange([template, target]);
+
+        var oldJob = new GradingJob
+        {
+            SubmissionId = template.Id,
+            Status = JobStatus.Done,
+            FinishedAt = DateTime.UtcNow.AddHours(-2),
+        };
+        var latestJob = new GradingJob
+        {
+            SubmissionId = template.Id,
+            Status = JobStatus.Done,
+            FinishedAt = DateTime.UtcNow.AddHours(-1),
+        };
+        uow.GradingJobsRepo.Items.AddRange([oldJob, latestJob]);
+
+        var oldQuestionId = Guid.NewGuid();
+        var latestQuestionId1 = Guid.NewGuid();
+        var latestQuestionId2 = Guid.NewGuid();
+        uow.QuestionResultsRepo.Items.Add(new QuestionResult
+        {
+            SubmissionId = template.Id,
+            GradingJobId = oldJob.Id,
+            QuestionId = oldQuestionId,
+            Score = 10,
+            MaxScore = 10,
+        });
+        uow.QuestionResultsRepo.Items.Add(new QuestionResult
+        {
+            SubmissionId = template.Id,
+            GradingJobId = latestJob.Id,
+            QuestionId = latestQuestionId1,
+            Score = 6,
+            MaxScore = 6,
+            Detail = JsonSerializer.Serialize(new List<TestCaseResult>
+            {
+                new() { TestCaseId = Guid.NewGuid(), Pass = true, AwardedScore = 6 },
+            }),
+        });
+        uow.QuestionResultsRepo.Items.Add(new QuestionResult
+        {
+            SubmissionId = template.Id,
+            GradingJobId = latestJob.Id,
+            QuestionId = latestQuestionId2,
+            Score = 4,
+            MaxScore = 4,
+            Detail = JsonSerializer.Serialize(new List<TestCaseResult>
+            {
+                new() { TestCaseId = Guid.NewGuid(), Pass = true, AwardedScore = 4 },
+            }),
+        });
+
+        var results = await svc.ImportCustomResultAsync(target.Id, new ImportCustomResultRequest
+        {
+            TemplateSubmissionId = template.Id,
+            Score = 5,
+            Reason = "Latest template",
+        });
+
+        Assert.Equal(2, results.Count);
+        Assert.DoesNotContain(results, r => r.QuestionId == oldQuestionId);
+        Assert.Contains(results, r => r.QuestionId == latestQuestionId1 && r.FinalScore == 3);
+        Assert.Contains(results, r => r.QuestionId == latestQuestionId2 && r.FinalScore == 2);
+        Assert.Equal(5, results.Sum(r => r.FinalScore));
+        Assert.All(results, r => Assert.Equal(Assert.Single(r.TestCaseResults!).AwardedScore, r.FinalScore));
+    }
+
+    [Fact]
+    public async Task ImportCustomResultAsync_ReplacesTargetResultsWhenCalledAgain()
+    {
+        var (svc, uow, _) = CreateSut();
+        var assignmentId = Guid.NewGuid();
+        var template = MakeSubmission();
+        var target = MakeSubmission();
+        template.AssignmentId = assignmentId;
+        target.AssignmentId = assignmentId;
+        uow.SubmissionsRepo.Items.AddRange([template, target]);
+
+        var templateJob = new GradingJob
+        {
+            SubmissionId = template.Id,
+            Status = JobStatus.Done,
+            FinishedAt = DateTime.UtcNow,
+        };
+        uow.GradingJobsRepo.Items.Add(templateJob);
+        uow.QuestionResultsRepo.Items.Add(new QuestionResult
+        {
+            SubmissionId = template.Id,
+            GradingJobId = templateJob.Id,
+            QuestionId = Guid.NewGuid(),
+            Score = 10,
+            MaxScore = 10,
+        });
+        uow.QuestionResultsRepo.Items.Add(new QuestionResult
+        {
+            SubmissionId = target.Id,
+            QuestionId = Guid.NewGuid(),
+            Score = 2,
+            MaxScore = 10,
+        });
+
+        var request = new ImportCustomResultRequest
+        {
+            TemplateSubmissionId = template.Id,
+            Score = 8,
+            Reason = "Custom score",
+        };
+        await svc.ImportCustomResultAsync(target.Id, request);
+        await svc.ImportCustomResultAsync(target.Id, request);
+
+        var targetResults = uow.QuestionResultsRepo.Items
+            .Where(r => r.SubmissionId == target.Id)
+            .ToList();
+        Assert.Single(targetResults);
+        Assert.Equal(8, targetResults[0].FinalScore);
+    }
+
+    [Fact]
+    public async Task ImportCustomResultAsync_RejectsNonFullScoreTemplate()
+    {
+        var (svc, uow, _) = CreateSut();
+        var assignmentId = Guid.NewGuid();
+        var template = MakeSubmission();
+        var target = MakeSubmission();
+        template.AssignmentId = assignmentId;
+        target.AssignmentId = assignmentId;
+        uow.SubmissionsRepo.Items.AddRange([template, target]);
+        var templateJob = new GradingJob
+        {
+            SubmissionId = template.Id,
+            Status = JobStatus.Done,
+            FinishedAt = DateTime.UtcNow,
+        };
+        uow.GradingJobsRepo.Items.Add(templateJob);
+        uow.QuestionResultsRepo.Items.Add(new QuestionResult
+        {
+            SubmissionId = template.Id,
+            GradingJobId = templateJob.Id,
+            QuestionId = Guid.NewGuid(),
+            Score = 9,
+            MaxScore = 10,
+        });
+
+        var ex = await Assert.ThrowsAsync<BadRequestException>(() =>
+            svc.ImportCustomResultAsync(target.Id, new ImportCustomResultRequest
+            {
+                TemplateSubmissionId = template.Id,
+                Score = 8,
+                Reason = "Custom score",
+            }));
+
+        Assert.Contains("full-score", ex.Message);
+    }
+
+    [Fact]
+    public async Task ImportCustomResultAsync_RejectsTemplateFromDifferentAssignment()
+    {
+        var (svc, uow, _) = CreateSut();
+        var template = MakeSubmission();
+        var target = MakeSubmission();
+        template.AssignmentId = Guid.NewGuid();
+        target.AssignmentId = Guid.NewGuid();
+        uow.SubmissionsRepo.Items.AddRange([template, target]);
+
+        var ex = await Assert.ThrowsAsync<BadRequestException>(() =>
+            svc.ImportCustomResultAsync(target.Id, new ImportCustomResultRequest
+            {
+                TemplateSubmissionId = template.Id,
+                Score = 8,
+                Reason = "Custom score",
+            }));
+
+        Assert.Contains("same assignment", ex.Message);
+    }
+
+    [Fact]
+    public async Task ImportCustomResultAsync_RejectsScoreAboveTemplateMax()
+    {
+        var (svc, uow, _) = CreateSut();
+        var assignmentId = Guid.NewGuid();
+        var template = MakeSubmission();
+        var target = MakeSubmission();
+        template.AssignmentId = assignmentId;
+        target.AssignmentId = assignmentId;
+        uow.SubmissionsRepo.Items.AddRange([template, target]);
+
+        var templateJob = new GradingJob
+        {
+            SubmissionId = template.Id,
+            Status = JobStatus.Done,
+            FinishedAt = DateTime.UtcNow,
+        };
+        uow.GradingJobsRepo.Items.Add(templateJob);
+        uow.QuestionResultsRepo.Items.Add(new QuestionResult
+        {
+            SubmissionId = template.Id,
+            GradingJobId = templateJob.Id,
+            QuestionId = Guid.NewGuid(),
+            Score = 10,
+            MaxScore = 10,
+        });
+
+        var ex = await Assert.ThrowsAsync<BadRequestException>(() =>
+            svc.ImportCustomResultAsync(target.Id, new ImportCustomResultRequest
+            {
+                TemplateSubmissionId = template.Id,
+                Score = 11,
+                Reason = "Custom score",
+            }));
+
+        Assert.Contains("Score must be in range", ex.Message);
+    }
+
+    [Theory]
+    [InlineData(JobStatus.Pending)]
+    [InlineData(JobStatus.Running)]
+    public async Task ImportCustomResultAsync_RejectsActiveTargetGrading(JobStatus activeStatus)
+    {
+        var (svc, uow, _) = CreateSut();
+        var assignmentId = Guid.NewGuid();
+        var template = MakeSubmission();
+        var target = MakeSubmission();
+        template.AssignmentId = assignmentId;
+        target.AssignmentId = assignmentId;
+        uow.SubmissionsRepo.Items.AddRange([template, target]);
+        uow.GradingJobsRepo.Items.Add(new GradingJob
+        {
+            SubmissionId = target.Id,
+            Status = activeStatus,
+            CreatedAt = DateTime.UtcNow,
+        });
+
+        var ex = await Assert.ThrowsAsync<BadRequestException>(() =>
+            svc.ImportCustomResultAsync(target.Id, new ImportCustomResultRequest
+            {
+                TemplateSubmissionId = template.Id,
+                Score = 8,
+                Reason = "Custom score",
+            }));
+
+        Assert.Contains("already being graded", ex.Message);
     }
 }

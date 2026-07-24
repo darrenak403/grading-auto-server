@@ -31,7 +31,7 @@ public class SupabaseSyncService : ISupabaseSyncService
         _logger = logger;
     }
 
-    public async Task SyncSubmissionAsync(
+    public async Task<SyncSupabaseGradeResponse?> SyncSubmissionAsync(
         Guid submissionId,
         string? labIdOverride = null,
         string? classNameOverride = null,
@@ -60,7 +60,7 @@ public class SupabaseSyncService : ISupabaseSyncService
         if (latestJob is null)
         {
             _logger.LogWarning("No grading jobs found for submission {SubmissionId}. Cannot sync.", submissionId);
-            return;
+            return null;
         }
 
         var results = (await _uow.LabTestCaseResults.FindAsync(r => r.LabGradingJobId == latestJob.Id)).ToList();
@@ -137,6 +137,8 @@ public class SupabaseSyncService : ISupabaseSyncService
             submissionId,
             studentCode,
             syncResult.GradingSessionId);
+
+        return syncResult;
     }
 
     public async Task<SupabaseDropdownOptionsDto> GetDropdownOptionsAsync(string? termId = null, string? className = null, string? labCode = null, CancellationToken ct = default)
@@ -182,16 +184,43 @@ public class SupabaseSyncService : ISupabaseSyncService
         if (submissions.Count == 0) return 0;
 
         var syncedCount = 0;
+        var syncedSessionIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var sub in submissions)
         {
             try
             {
-                await SyncSubmissionAsync(sub.Id, request?.LabId, request?.ClassName, request?.TermId, request?.GradingSessionId, ct);
-                syncedCount++;
+                var result = await SyncSubmissionAsync(sub.Id, request?.LabId, request?.ClassName, request?.TermId, request?.GradingSessionId, ct);
+                if (result is not null)
+                {
+                    syncedSessionIds.Add(result.GradingSessionId);
+                    syncedCount++;
+                }
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to sync submission {SubmissionId} to Supabase", sub.Id);
+            }
+        }
+
+        foreach (var sessionId in syncedSessionIds)
+        {
+            try
+            {
+                var backfilledCount = await BackfillMissingSessionSubmissionsFromPreviousAsync(sessionId, ct);
+                if (backfilledCount > 0)
+                {
+                    _logger.LogInformation(
+                        "Backfilled {BackfilledCount} missing Supabase submissions for grading session {GradingSessionId}",
+                        backfilledCount,
+                        sessionId);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(
+                    ex,
+                    "Failed to backfill missing Supabase submissions for grading session {GradingSessionId}",
+                    sessionId);
             }
         }
 
@@ -242,6 +271,7 @@ public class SupabaseSyncService : ISupabaseSyncService
         var termId = NormalizeNullableSupabaseKey(request.TermId);
         var synced = new List<SyncSupabaseGradeItemResult>();
         var failed = new List<SyncSupabaseGradeItemFailure>();
+        var syncedSessionIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var item in request.Submissions)
         {
@@ -269,6 +299,7 @@ public class SupabaseSyncService : ISupabaseSyncService
                     studentCode,
                     result.ClassStudentId,
                     result.GradingSessionId));
+                syncedSessionIds.Add(result.GradingSessionId);
             }
             catch (Exception ex)
             {
@@ -277,10 +308,28 @@ public class SupabaseSyncService : ISupabaseSyncService
             }
         }
 
+        var backfilledCount = 0;
+        foreach (var sessionId in syncedSessionIds)
+        {
+            try
+            {
+                backfilledCount += await BackfillMissingSessionSubmissionsFromPreviousAsync(sessionId, ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(
+                    ex,
+                    "Failed to backfill missing Supabase submissions for grading session {GradingSessionId}",
+                    sessionId);
+                failed.Add(new SyncSupabaseGradeItemFailure("(backfill)", ex.Message));
+            }
+        }
+
         return new SyncSupabaseGradesResponse(
             request.Submissions.Count,
             synced.Count,
             failed.Count,
+            backfilledCount,
             synced,
             failed);
     }
@@ -636,6 +685,48 @@ public class SupabaseSyncService : ISupabaseSyncService
             var errorContent = await response.Content.ReadAsStringAsync(ct);
             throw new BadRequestException($"Failed to create Supabase session_submission: {response.StatusCode} - {errorContent}");
         }
+    }
+
+    private async Task<int> BackfillMissingSessionSubmissionsFromPreviousAsync(
+        string gradingSessionId,
+        CancellationToken ct)
+    {
+        var payload = new
+        {
+            p_grading_session_id = gradingSessionId
+        };
+
+        var request = new HttpRequestMessage(
+            HttpMethod.Post,
+            "rest/v1/rpc/backfill_missing_session_submissions_from_previous")
+        {
+            Content = JsonContent.Create(payload)
+        };
+        AddSupabaseAuthHeaders(request);
+
+        var response = await _client.SendAsync(request, ct);
+        var responseBody = await response.Content.ReadAsStringAsync(ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new BadRequestException(
+                $"Failed to backfill missing Supabase session_submissions: {response.StatusCode} - {responseBody}");
+        }
+
+        return ParseRpcInteger(responseBody);
+    }
+
+    private static int ParseRpcInteger(string responseBody)
+    {
+        if (string.IsNullOrWhiteSpace(responseBody))
+        {
+            return 0;
+        }
+
+        using var doc = JsonDocument.Parse(responseBody);
+        return doc.RootElement.ValueKind == JsonValueKind.Number &&
+               doc.RootElement.TryGetInt32(out var value)
+            ? value
+            : 0;
     }
 
     private async Task<JsonElement?> GetFirstArrayElementAsync(string url, CancellationToken ct)

@@ -106,6 +106,73 @@ public class SupabaseSyncServiceTests
         Assert.False(root.TryGetProperty("p_fulfills_request_id", out _));
     }
 
+    [Fact]
+    public async Task SyncGradesAsync_BackfillsMissingSubmissionsAfterBatchSync()
+    {
+        var requests = new List<CapturedRequest>();
+        var classStudentCalls = 0;
+        var handler = new StubHttpMessageHandler(async request =>
+        {
+            requests.Add(await CapturedRequest.FromAsync(request));
+            var path = request.RequestUri!.PathAndQuery;
+
+            if (path.StartsWith("/rest/v1/class_students", StringComparison.Ordinal))
+            {
+                classStudentCalls++;
+                return JsonResponse($"[{{\"id\":\"class-student-id-{classStudentCalls}\"}}]");
+            }
+            if (path.StartsWith("/rest/v1/grading_sessions", StringComparison.Ordinal))
+            {
+                return JsonResponse("[{\"id\":\"grading-session-id\"}]");
+            }
+            if (path == "/rest/v1/rpc/create_session_submission")
+            {
+                return JsonResponse("{}");
+            }
+            if (path == "/rest/v1/rpc/backfill_missing_session_submissions_from_previous")
+            {
+                return JsonResponse("2");
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+        var service = CreateService(handler);
+        using var detailsDocument = JsonDocument.Parse("{\"passed\":1}");
+
+        var result = await service.SyncGradesAsync(new SyncSupabaseGradesRequest(
+            "SE1815",
+            "LAB1",
+            new List<SyncSupabaseGradeItemRequest>
+            {
+                new SyncSupabaseGradeItemRequest(
+                    "SE180001",
+                    8.5m,
+                    detailsDocument.RootElement.Clone(),
+                    "https://example.test/submission-1"),
+                new SyncSupabaseGradeItemRequest(
+                    "SE180002",
+                    9.0m,
+                    detailsDocument.RootElement.Clone(),
+                    "https://example.test/submission-2")
+            },
+            "term-id",
+            "grading-session-id"));
+
+        Assert.Equal(2, result.Total);
+        Assert.Equal(2, result.SyncedCount);
+        Assert.Equal(0, result.FailedCount);
+        Assert.Equal(2, result.BackfilledCount);
+        Assert.Equal(2, requests.Count(request =>
+            request.PathAndQuery == "/rest/v1/rpc/create_session_submission"));
+
+        var backfillRequest = Assert.Single(requests, request =>
+            request.PathAndQuery == "/rest/v1/rpc/backfill_missing_session_submissions_from_previous");
+        using var payload = JsonDocument.Parse(backfillRequest.Body!);
+        Assert.Equal(
+            "grading-session-id",
+            payload.RootElement.GetProperty("p_grading_session_id").GetString());
+    }
+
     private static SupabaseSyncService CreateService(HttpMessageHandler handler)
     {
         var client = new HttpClient(handler)
