@@ -99,7 +99,7 @@ be/
 
 ### Tạo đề & test cases
 
-Giảng viên tạo Assignment → upload `database.sql` (Q1) và/hoặc Given API (Q2) → tạo Questions → TestCases (method, URL, input/expected JSON, điểm).
+Giảng viên tạo Assignment → upload `database.sql` (dùng cho Q1) và/hoặc Given API (dùng cho Q2) → tạo Questions (`Type = Api` cho Q1, `Type = Razor` cho Q2) → TestCases tương ứng. Chi tiết: [Quy trình chấm PE](#quy-trình-chấm-pe).
 
 ### Nộp bài & chấm
 
@@ -117,41 +117,56 @@ Gom nhiều Assignment, xem kết quả tổng hợp, export multi-sheet.
 
 ## Quy trình chấm PE
 
-PE (Practical Exam) chấm theo **Assignment → Question → TestCase**, có thể gom nhiều Assignment vào một **ExamSession**. Chấm nhiều round, mỗi round độc lập.
+PE (Practical Exam) chấm theo **Assignment → Question → TestCase**, có thể gom nhiều Assignment vào một **ExamSession**. Chấm nhiều round, mỗi round độc lập. Một Assignment thường có 2 Question: **Q1** (`QuestionType.Api`) và **Q2** (`QuestionType.Razor`), mỗi câu chấm bằng cơ chế khác nhau.
+
+| | Q1 (`Api`) | Q2 (`Razor`) |
+|---|---|---|
+| Đề bài | ASP.NET Web API + Stored Procedures | ASP.NET Razor Pages, gọi tới **Given API** |
+| DB | SQL Server — tạo DB tạm từ `database.sql`, restore mỗi lần chấm, xoá sau khi xong | Không cần DB riêng (dùng Given API) |
+| Chạy test | Gọi thẳng HTTP (`RunApiCasesAsync`) theo `HttpMethod`/`UrlTemplate`/`Input`/`ExpectedBody`/`ExpectedStatus` | Playwright điều khiển trình duyệt qua **Chromium CDP** (`RunPlaywrightCasesAsync`), check theo `Selector`/`ElementId`/`ElementText`, hỗ trợ flow tuần tự (`Order` + `Extract`) |
+| Điều kiện đặc biệt | Không cần Playwright | Nếu `appsettings.json` sinh viên không chứa đúng `GivenApiBaseUrl` (assignment-level, hoặc tự start từ `given.zip`) → app không chạy, toàn bộ test case của Q2 bị **0 điểm** (`GivenUrlInvalid`) |
+| Hạ tầng cần bật | `task up` | `task up` **+** `task playwright:up` (bật Chromium CDP, uncomment `Playwright__BrowserCdpEndpoint` trong `docker/.env.local`) rồi mới `task worker` |
 
 ### 1. Chuẩn bị đề
 
-1. `POST /assignments` — tạo assignment (Q1: SQL/Stored Procedures, Q2: ASP.NET Razor API).
-2. `PUT /assignments/{id}/resources` — upload `database.sql` (Q1) và/hoặc Given API `.zip` (Q2).
-3. `POST /assignments/{assignmentId}/questions` — tạo từng câu hỏi.
-4. `POST /questions/{questionId}/test-cases` — tạo test case cho câu hỏi (method, URL, input/expected JSON, điểm).
+1. `POST /assignments` — tạo assignment.
+2. `PUT /assignments/{id}/resources` — upload `database.sql` (dùng cho Q1) và/hoặc Given API `.zip` / `GivenApiBaseUrl` (dùng cho Q2).
+3. `POST /assignments/{assignmentId}/questions` — tạo Question, chỉ định `Type = Api` (Q1) hoặc `Type = Razor` (Q2), `ArtifactFolderName` (vd. `Q1`, `Q2` — khớp tên thư mục trong artifact sinh viên nộp).
+4. `POST /questions/{questionId}/test-cases` — tạo test case theo đúng loại câu hỏi:
+   - Q1: `HttpMethod`, `UrlTemplate`, `Input`, `ExpectedStatus`, `ExpectedBody` (so JSON response).
+   - Q2: `HttpMethod` = URL trang Razor cần mở, `Selector`/`ElementId`/`ElementText`/`SelectorMinCount` (kiểm tra DOM), `Order` + `Extract` khi cần chạy tuần tự nhiều bước (vd. tạo record ở bước 1, lấy id dùng cho bước 2).
 
 ### 2. Import thí sinh & nộp bài
 
 5. `POST /assignments/{id}/participants/import` — import danh sách thí sinh (CSV: mã SV).
 6. Nộp bài — chọn một trong hai:
-   - `POST /assignments/{id}/bulk-upload` — upload `master.zip`, thêm submission vào round **hiện tại**.
+   - `POST /assignments/{id}/bulk-upload` — upload `master.zip` (chứa cả thư mục `Q1/` và `Q2/` theo `ArtifactFolderName`), thêm submission vào round **hiện tại**.
    - `POST /assignments/{id}/rounds` — tạo round mới (tự động đánh số "Lần 1", "Lần 2", ...) rồi upload vào round đó.
 
 ### 3. Chấm bài
 
-7. `POST /assignments/{id}/grade` — trigger chấm toàn bộ assignment (round hiện tại), publish message qua RabbitMQ.
-   - Worker (`GradingPipeline`): extract artifact → chạy test case (Playwright/Newman/SQL Server) → lưu `QuestionResult` → cleanup.
+7. Trước khi chấm câu Q2: bật Chromium CDP — `task playwright:up`, đảm bảo Worker đã cấu hình `Playwright__BrowserCdpEndpoint`, rồi (khởi động lại) `task worker`.
+8. `POST /assignments/{id}/grade` — trigger chấm toàn bộ assignment (round hiện tại), publish message qua RabbitMQ.
+   - Worker (`GradingPipeline`) xử lý từng Question trong artifact:
+     - **Q1**: tạo DB tạm trên SQL Server từ `database.sql`, override connection string trong `appsettings` của sinh viên, `dotnet run` project sinh viên, gọi HTTP theo test case, xoá DB tạm sau khi xong.
+     - **Q2**: start Given API (từ `given.zip` hoặc dùng `GivenApiBaseUrl` tĩnh) → kiểm tra `appsettings` sinh viên trỏ đúng Given API → `dotnet run` project sinh viên → Playwright mở từng trang, chạy test case theo `Order`.
+   - Lưu `QuestionResult` cho từng câu, cleanup process/sandbox.
    - Chấm lại 1 bài lỗi: `POST /submissions/{id}/grade` (chỉ retry khi status = `Failed`).
-8. Theo dõi job: `GET /grading-jobs/{id}` hoặc `GET /submissions/{submissionId}/grading-jobs`.
+9. Theo dõi job: `GET /grading-jobs/{id}` hoặc `GET /submissions/{submissionId}/grading-jobs`.
+10. Sau khi chấm xong, có thể tắt CDP: `task playwright:down`.
 
 ### 4. Xem kết quả & export
 
-9. `GET /assignments/{assignmentId}/submissions` (filter theo round), `GET /submissions/{id}/results`.
-10. Điều chỉnh điểm/ghi chú: `PUT /submissions/{id}/custom-result`, `PUT /submissions/{id}/notes`.
-11. Export Excel: `POST /exports` → `GET /exports/{id}` → `GET /exports/{id}/download` (EPPlus). `FinalScore = AdjustedScore ?? AutoScore`.
+11. `GET /assignments/{assignmentId}/submissions` (filter theo round), `GET /submissions/{id}/results`.
+12. Điều chỉnh điểm/ghi chú: `PUT /submissions/{id}/custom-result`, `PUT /submissions/{id}/notes`.
+13. Export Excel: `POST /exports` → `GET /exports/{id}` → `GET /exports/{id}/download` (EPPlus). `FinalScore = AdjustedScore ?? AutoScore`.
 
 ### 5. (Tuỳ chọn) Gom nhiều assignment thành kỳ thi
 
-12. `POST /exam-sessions` — tạo session, gán các assignment liên quan.
-13. `POST /exam-sessions/{id}/participants/import` — import thí sinh chung cho session.
-14. `GET /exam-sessions/{id}/results` — xem kết quả tổng hợp toàn kỳ thi.
-15. `POST /exam-sessions/{id}/exports` — export multi-sheet (mỗi assignment một sheet).
+14. `POST /exam-sessions` — tạo session, gán các assignment liên quan.
+15. `POST /exam-sessions/{id}/participants/import` — import thí sinh chung cho session.
+16. `GET /exam-sessions/{id}/results` — xem kết quả tổng hợp toàn kỳ thi.
+17. `POST /exam-sessions/{id}/exports` — export multi-sheet (mỗi assignment một sheet).
 
 ---
 
