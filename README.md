@@ -25,6 +25,8 @@ Chi tiết cấu hình và các lệnh chạy riêng: [`BE.md`](BE.md).
 - [Tech stack](#tech-stack)
 - [Cấu trúc repo](#cấu-trúc-repo)
 - [Luồng nghiệp vụ](#luồng-nghiệp-vụ)
+- [Quy trình chấm PE](#quy-trình-chấm-pe)
+- [Quy trình chấm Lab](#quy-trình-chấm-lab)
 - [API](#api)
 - [Storage](#storage)
 - [Ghi chú kỹ thuật](#ghi-chú-kỹ-thuật)
@@ -110,6 +112,85 @@ Xem submission/results, chỉnh `AdjustedScore`, ReviewNote → ExportJob → Ex
 ### Kỳ thi (ExamSession)
 
 Gom nhiều Assignment, xem kết quả tổng hợp, export multi-sheet.
+
+---
+
+## Quy trình chấm PE
+
+PE (Practical Exam) chấm theo **Assignment → Question → TestCase**, có thể gom nhiều Assignment vào một **ExamSession**. Chấm nhiều round, mỗi round độc lập.
+
+### 1. Chuẩn bị đề
+
+1. `POST /assignments` — tạo assignment (Q1: SQL/Stored Procedures, Q2: ASP.NET Razor API).
+2. `PUT /assignments/{id}/resources` — upload `database.sql` (Q1) và/hoặc Given API `.zip` (Q2).
+3. `POST /assignments/{assignmentId}/questions` — tạo từng câu hỏi.
+4. `POST /questions/{questionId}/test-cases` — tạo test case cho câu hỏi (method, URL, input/expected JSON, điểm).
+
+### 2. Import thí sinh & nộp bài
+
+5. `POST /assignments/{id}/participants/import` — import danh sách thí sinh (CSV: mã SV).
+6. Nộp bài — chọn một trong hai:
+   - `POST /assignments/{id}/bulk-upload` — upload `master.zip`, thêm submission vào round **hiện tại**.
+   - `POST /assignments/{id}/rounds` — tạo round mới (tự động đánh số "Lần 1", "Lần 2", ...) rồi upload vào round đó.
+
+### 3. Chấm bài
+
+7. `POST /assignments/{id}/grade` — trigger chấm toàn bộ assignment (round hiện tại), publish message qua RabbitMQ.
+   - Worker (`GradingPipeline`): extract artifact → chạy test case (Playwright/Newman/SQL Server) → lưu `QuestionResult` → cleanup.
+   - Chấm lại 1 bài lỗi: `POST /submissions/{id}/grade` (chỉ retry khi status = `Failed`).
+8. Theo dõi job: `GET /grading-jobs/{id}` hoặc `GET /submissions/{submissionId}/grading-jobs`.
+
+### 4. Xem kết quả & export
+
+9. `GET /assignments/{assignmentId}/submissions` (filter theo round), `GET /submissions/{id}/results`.
+10. Điều chỉnh điểm/ghi chú: `PUT /submissions/{id}/custom-result`, `PUT /submissions/{id}/notes`.
+11. Export Excel: `POST /exports` → `GET /exports/{id}` → `GET /exports/{id}/download` (EPPlus). `FinalScore = AdjustedScore ?? AutoScore`.
+
+### 5. (Tuỳ chọn) Gom nhiều assignment thành kỳ thi
+
+12. `POST /exam-sessions` — tạo session, gán các assignment liên quan.
+13. `POST /exam-sessions/{id}/participants/import` — import thí sinh chung cho session.
+14. `GET /exam-sessions/{id}/results` — xem kết quả tổng hợp toàn kỳ thi.
+15. `POST /exam-sessions/{id}/exports` — export multi-sheet (mỗi assignment một sheet).
+
+---
+
+## Quy trình chấm Lab
+
+Lab chấm theo **LabAssignment → LabTestCase**, không có Question — mỗi lab là một bài chấm độc lập, hỗ trợ chấm bằng Docker Compose của sinh viên.
+
+### 1. Chuẩn bị đề
+
+1. `POST /lab-assignments` — tạo lab assignment (gắn semester).
+2. `POST /lab-assignments/{id}/testcases` — tạo test case đơn, hoặc `POST /lab-assignments/{id}/testcases/batch` — import hàng loạt (JSON array, thường sinh bằng AI theo `docs/testcase-prompt-template.md`).
+   - Test case thường (`HTTP`): gọi API sinh viên chấm theo `httpMethod`, `urlTemplate`, `inputJson`/`expectJson`.
+   - Test case `SOURCE`: kiểm tra mã nguồn (không cần chạy Docker) — `httpMethod = "SOURCE"`, `urlTemplate = "rule:args"` với rule `project-count:N`, `project-name:GLOB`, `folder-exists:GLOB`, `file-exists:GLOB`, `file-contains:GLOB:TEXT`, `file-not-contains:GLOB:TEXT`.
+3. `PATCH /lab-assignments/{id}/testcases/approve-all` — duyệt hàng loạt test case ở trạng thái `Draft` → `Approved` (hoặc duyệt từng cái: `PATCH /lab-testcases/{id}/status`).
+
+### 2. Nộp bài
+
+4. Nộp từng bài: `POST /lab-submissions?assignmentId={id}` — multipart upload, tên file theo convention **`Lab{N}_{MaSV}.zip`** (vd. `Lab1_SE180234.zip`).
+   - Hoặc nộp hàng loạt: `POST /lab-assignments/{assignmentId}/bulk-upload`.
+5. `GET /lab-assignments/{id}/roster` — đối chiếu danh sách sinh viên đã nộp/chưa nộp.
+
+### 3. Chấm bài
+
+6. `POST /lab-assignments/{id}/grade` — trigger chấm toàn bộ submission Pending của lab (bỏ qua job đang `Pending`/`Running`), hoặc `POST /lab-assignments/{id}/grade-all` — chấm lại toàn bộ kể cả đã chấm.
+   - Worker (`LabGradingWorker`, polling 5s + `LabGradeJobConsumer` qua RabbitMQ/MassTransit):
+     1. Extract ZIP/RAR.
+     2. Chạy SOURCE test case trước (không phụ thuộc Docker).
+     3. `docker compose up` bằng compose file của sinh viên → strip toàn bộ `ports:` gốc, tự động detect service API + port (fallback `api:8080`) → gán host port trong dải **15000–16000** → chạy HTTP test case → `docker compose down`.
+     4. Lưu `LabTestCaseResult`.
+   - Yêu cầu hạ tầng: pre-pull base image Docker trên máy chấm (vd. `docker pull mcr.microsoft.com/dotnet/aspnet:8.0`) để tránh lỗi `BuildFailed` do mạng.
+7. Chấm lại 1 bài: `POST /lab-submissions/{id}/regrade`; chấm lại toàn bộ lab: `POST /lab-submissions/regrade-all?assignmentId={id}`.
+8. Theo dõi tiến độ: `GET /lab-assignments/{id}/grading-progress`.
+
+### 4. Xem kết quả & export
+
+9. `GET /lab-submissions?assignmentId={id}` (sort theo mã SV), `GET /lab-submissions/{id}/results`.
+10. Điều chỉnh điểm: `PUT /lab-submissions/{id}/adjust`; sửa kết quả test case cụ thể: `PUT /lab-submissions/{id}/custom-result`.
+11. Export: `POST /lab-assignments/{id}/exports`.
+12. (Tuỳ chọn) Đồng bộ điểm lên Supabase: `POST /lab-assignments/{id}/sync-supabase` (toàn bộ) hoặc `POST /lab-assignments/sync-supabase-grade(s)` (từng bài/hàng loạt).
 
 ---
 
