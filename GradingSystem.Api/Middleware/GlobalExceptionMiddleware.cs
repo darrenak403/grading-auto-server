@@ -1,18 +1,18 @@
-using System.Net;
 using System.Text.Json;
 using GradingSystem.Application.Common;
 using GradingSystem.Application.Exceptions;
-using Microsoft.Extensions.Logging;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Hosting;
+using Npgsql;
 
 namespace GradingSystem.Api.Middleware;
 
-public sealed class GlobalExceptionMiddleware(RequestDelegate next, ILogger<GlobalExceptionMiddleware> logger)
+public class GlobalExceptionMiddleware(
+    RequestDelegate next,
+    ILogger<GlobalExceptionMiddleware> logger,
+    IHostEnvironment environment)
 {
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        WriteIndented = false
-    };
+    private static readonly JsonSerializerOptions _jsonOpts = new(JsonSerializerDefaults.Web);
 
     public async Task InvokeAsync(HttpContext context)
     {
@@ -20,33 +20,48 @@ public sealed class GlobalExceptionMiddleware(RequestDelegate next, ILogger<Glob
         {
             await next(context);
         }
-        catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
-        {
-            throw;
-        }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Unhandled exception: {Message}", ex.Message);
-            await WriteErrorAsync(context, ex);
+            logger.LogError(ex, "Unhandled exception {TraceId}", context.TraceIdentifier);
+            await WriteErrorAsync(context, ex, environment.IsDevelopment());
         }
     }
 
-    private static async Task WriteErrorAsync(HttpContext context, Exception ex)
+    private static async Task WriteErrorAsync(HttpContext context, Exception ex, bool includeDetails)
     {
-        var traceId = context.TraceIdentifier;
-
-        var (statusCode, message) = ex switch
+        var (status, message) = ex switch
         {
-            NotFoundException => (HttpStatusCode.NotFound, ex.Message),
-            BadRequestException => (HttpStatusCode.BadRequest, ex.Message),
-            ConflictException => (HttpStatusCode.Conflict, ex.Message),
-            _ => (HttpStatusCode.InternalServerError, "An unexpected error occurred.")
+            NotFoundException n       => (StatusCodes.Status404NotFound, n.Message),
+            BadRequestException b     => (StatusCodes.Status400BadRequest, b.Message),
+            ConflictException c       => (StatusCodes.Status409Conflict, c.Message),
+            DbUpdateException { InnerException: PostgresException { SqlState: "23505" } pg }
+                                      => (StatusCodes.Status409Conflict, $"A record with the same unique value already exists. ({pg.ConstraintName})"),
+            ArgumentException or ArgumentNullException => (StatusCodes.Status400BadRequest, ex.Message),
+            KeyNotFoundException      => (StatusCodes.Status404NotFound, ex.Message),
+            UnauthorizedAccessException => (StatusCodes.Status401Unauthorized, ex.Message),
+            _ => (StatusCodes.Status500InternalServerError, "An unexpected error occurred."),
         };
 
-        context.Response.ContentType = "application/json";
-        context.Response.StatusCode = (int)statusCode;
+        if (context.Response.HasStarted)
+            throw ex;
 
-        var body = ApiResponse<object>.Fail(message, traceId: traceId);
-        await context.Response.WriteAsync(JsonSerializer.Serialize(body, JsonOptions));
+        context.Response.StatusCode = status;
+        context.Response.ContentType = "application/json";
+
+        var body = includeDetails
+            ? ApiResponse.Fail(
+                message,
+                BuildErrors(ex),
+                context.TraceIdentifier)
+            : ApiResponse.Fail(message, traceId: context.TraceIdentifier);
+        await context.Response.WriteAsync(JsonSerializer.Serialize(body, _jsonOpts));
+    }
+
+    private static IEnumerable<string> BuildErrors(Exception ex)
+    {
+        var errors = new List<string> { $"{ex.GetType().Name}: {ex.Message}" };
+        if (!string.IsNullOrWhiteSpace(ex.InnerException?.Message))
+            errors.Add($"Inner: {ex.InnerException.Message}");
+        return errors;
     }
 }

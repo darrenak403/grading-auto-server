@@ -1,0 +1,107 @@
+[
+  {
+    "name": "GET /api/journals – list + paperCount",
+    "httpMethod": "GET",
+    "urlTemplate": "/api/journals",
+    "expectedStatus": 200,
+    "expectedBody": [
+      {
+        "journalId": 1,
+        "journalName": "Vietnam Journal of Computer Science",
+        "impactFactor": 2.4,
+        "paperCount": 4
+      },
+      {
+        "journalId": 2,
+        "journalName": "International Journal of Biotechnology",
+        "impactFactor": 3.1,
+        "paperCount": 3
+      },
+      {
+        "journalId": 3,
+        "journalName": "Journal of Renewable Energy",
+        "impactFactor": 1.8,
+        "paperCount": 3
+      },
+      {
+        "journalId": 4,
+        "journalName": "Environmental Science Review",
+        "impactFactor": 2,
+        "paperCount": 1
+      },
+      {
+        "journalId": 5,
+        "journalName": "IEEE Transactions on AI",
+        "impactFactor": 6.5,
+        "paperCount": 2
+      }
+    ],
+    "order": 1,
+    "score": 1
+  },
+  {
+    "name": "GET /api/filter-papers?topic=Biotechnology&minCitations=30",
+    "httpMethod": "GET",
+    "urlTemplate": "/api/filter-papers",
+    "input": {"topic": "Biotechnology", "minCitations": 30},
+    "expectedStatus": 200,
+    "expectedBody": [
+      {
+        "paperId": 3,
+        "title": "Genetic Analysis of Cancer Inheritance",
+        "publishYear": 2021,
+        "citationCount": 60,
+        "journalName": "International Journal of Biotechnology",
+        "leadAuthor": "Prof. Thanh Van Hoang",
+        "topicList": ["Biotechnology", "Environment"]
+      },
+      {
+        "paperId": 12,
+        "title": "Extracting Natural Compounds from Herbs",
+        "publishYear": 2023,
+        "citationCount": 42,
+        "journalName": "International Journal of Biotechnology",
+        "leadAuthor": "Prof. Thanh Van Hoang",
+        "topicList": ["Biotechnology"]
+      }
+    ],
+    "order": 2,
+    "score": 1
+  },
+  {
+    "name": "GET /api/filter-papers?minCitations=-5 → 400",
+    "httpMethod": "GET",
+    "urlTemplate": "/api/filter-papers",
+    "input": {"minCitations": -5},
+    "expectedStatus": 400,
+    "order": 3,
+    "score": 1
+  },
+  {
+    "name": "POST /api/papers – tao bai bao moi hop le",
+    "httpMethod": "POST",
+    "urlTemplate": "/api/papers",
+    "input": {"title": "Nghien cuu blockchain trong y te", "publishYear": 2025, "journalId": 1},
+    "expectedStatus": 201,
+    "expectedBody": {
+      "paperId": 14,
+      "title": "Nghien cuu blockchain trong y te",
+      "publishYear": 2025,
+      "journalId": 1,
+      "citationCount": 0,
+      "paperAuthors": [],
+      "paperTopics": [],
+      "journal": null
+    },
+    "order": 4,
+    "score": 1
+  },
+  {
+    "name": "DELETE /api/papers/99 – khong ton tai → 404",
+    "httpMethod": "DELETE",
+    "urlTemplate": "/api/papers/99",
+    "expectedStatus": 404,
+    "order": 5,
+    "score": 1
+  }
+]

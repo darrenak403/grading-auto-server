@@ -16,6 +16,14 @@ public class UnitOfWork(GradingDbContext db) : IUnitOfWork
     public IGenericRepository<ReviewNote>     ReviewNotes     { get; } = new GenericRepository<ReviewNote>(db);
     public IGenericRepository<ExportJob>      ExportJobs      { get; } = new GenericRepository<ExportJob>(db);
 
+    // Lab grading
+    public IGenericRepository<Semester>          Semesters          { get; } = new GenericRepository<Semester>(db);
+    public IGenericRepository<LabAssignment>     LabAssignments     { get; } = new GenericRepository<LabAssignment>(db);
+    public IGenericRepository<LabTestCase>       LabTestCases       { get; } = new GenericRepository<LabTestCase>(db);
+    public IGenericRepository<LabSubmission>     LabSubmissions     { get; } = new GenericRepository<LabSubmission>(db);
+    public IGenericRepository<LabGradingJob>     LabGradingJobs     { get; } = new GenericRepository<LabGradingJob>(db);
+    public IGenericRepository<LabTestCaseResult> LabTestCaseResults { get; } = new GenericRepository<LabTestCaseResult>(db);
+
     public Task<int> SaveChangesAsync(CancellationToken ct = default) => db.SaveChangesAsync(ct);
     
     public void ClearChanges() => db.ChangeTracker.Clear();

@@ -1,0 +1,194 @@
+# Prod — full stack. Env: docker/.env (Dokploy / VPS pull image từ Docker Hub)
+#   docker compose --env-file .env -f docker-compose.prod.yml pull
+#   docker compose --env-file .env -f docker-compose.prod.yml up -d
+
+services:
+  postgres:
+    image: postgres:17.5-alpine3.22
+    container_name: grading-postgres
+    restart: unless-stopped
+    networks:
+      - grading-network
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - '${POSTGRES_PUBLISH_PORT:-5432}:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  pgweb:
+    image: sosedoff/pgweb
+    container_name: grading-pgweb
+    restart: unless-stopped
+    networks:
+      - grading-network
+    environment:
+      DATABASE_URL: 'postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable'
+    command: ['--auth-user=${PGWEB_USER}', '--auth-pass=${PGWEB_PASSWORD}']
+    ports:
+      - '${PGWEB_PORT:-8081}:8081'
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: grading-sqlserver
+    platform: linux/amd64
+    restart: unless-stopped
+    networks:
+      - grading-network
+    environment:
+      ACCEPT_EULA: 'Y'
+      SA_PASSWORD: ${SA_PASSWORD}
+      MSSQL_PID: Express
+    ports:
+      - '${SQLSERVER_PUBLISH_PORT:-1433}:1433'
+    volumes:
+      - sqlserver-data:/var/opt/mssql
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P '${SA_PASSWORD}' -Q 'SELECT 1' -C -b",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 45s
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: grading-rabbitmq
+    restart: unless-stopped
+    networks:
+      - grading-network
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+    ports:
+      - '${RABBITMQ_AMQP_PORT:-5672}:5672'
+      - '${RABBITMQ_UI_PORT:-15672}:15672'
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ['CMD', 'rabbitmq-diagnostics', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  api:
+    image: ${DOCKER_REPO}/grading-system-api:${IMAGE_TAG:-latest}
+    container_name: grading-api
+    pull_policy: always
+    restart: unless-stopped
+    ports:
+      - '${API_PORT:-5049}:8080'
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: ${ASPNETCORE_URLS:-http://+:8080}
+      ConnectionStrings__Postgres: 'Host=postgres;Port=5432;Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}'
+      Storage__BasePath: /storage
+      RabbitMQ__Host: rabbitmq://rabbitmq
+      RabbitMQ__Username: ${RABBITMQ_USER}
+      RabbitMQ__Password: ${RABBITMQ_PASSWORD}
+      Cors__AllowedOrigins__0: ${CORS_ORIGIN_0}
+      Cors__AllowedOrigins__1: ${CORS_ORIGIN_1}
+      Supabase__Url: ${SUPABASE_URL}
+      Supabase__ServiceRoleKey: ${SUPABASE_SERVICE_ROLE_KEY}
+      Supabase__AutoSync: ${SUPABASE_AUTO_SYNC:-true}
+    volumes:
+      - storage-data:/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - grading-network
+
+  chromium:
+    image: chromedp/headless-shell:latest
+    container_name: grading-chromium
+    restart: unless-stopped
+    command: ['--no-sandbox']
+    networks:
+      - grading-network
+
+  worker:
+    image: ${DOCKER_REPO}/grading-system-worker:${IMAGE_TAG:-latest}
+    container_name: grading-worker
+    pull_policy: always
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__Postgres: 'Host=postgres;Port=5432;Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}'
+      ConnectionStrings__SqlServer: 'Server=sqlserver,1433;User Id=sa;Password=${SA_PASSWORD};TrustServerCertificate=true'
+      Storage__BasePath: /storage
+      RabbitMQ__Host: rabbitmq://rabbitmq
+      RabbitMQ__Username: ${RABBITMQ_USER}
+      RabbitMQ__Password: ${RABBITMQ_PASSWORD}
+      Playwright__BrowserCdpEndpoint: http://chromium:9222
+      Worker__MaxConcurrentJobs: ${WORKER_MAX_CONCURRENT_JOBS:-3}
+      Supabase__Url: ${SUPABASE_URL}
+      Supabase__ServiceRoleKey: ${SUPABASE_SERVICE_ROLE_KEY}
+      Supabase__AutoSync: ${SUPABASE_AUTO_SYNC:-true}
+      Worker__LabMaxConcurrentJobs: ${WORKER_LAB_MAX_CONCURRENT_JOBS:-1}
+      Worker__PollIntervalSeconds: ${WORKER_POLL_INTERVAL_SECONDS:-5}
+      Worker__ArtifactHealthCheckTimeoutSeconds: ${WORKER_ARTIFACT_HEALTH_TIMEOUT_SECONDS:-30}
+      Worker__ArtifactPortRangeStart: ${WORKER_ARTIFACT_PORT_RANGE_START:-7000}
+      Worker__ArtifactPortRangeEnd: ${WORKER_ARTIFACT_PORT_RANGE_END:-7999}
+      Worker__BindHost: ${WORKER_BIND_HOST:-127.0.0.1}
+      Worker__NewmanExecutable: ${WORKER_NEWMAN_EXECUTABLE:-}
+      Worker__LabApiHost: ${WORKER_LAB_API_HOST:-host.docker.internal}
+      Worker__LabApiPortRangeStart: ${WORKER_LAB_API_PORT_START:-15000}
+      Worker__LabApiPortRangeEnd: ${WORKER_LAB_API_PORT_END:-16000}
+      Worker__LabDbPortRangeStart: ${WORKER_LAB_DB_PORT_START:-14000}
+      Worker__LabDbPortRangeEnd: ${WORKER_LAB_DB_PORT_END:-14999}
+      Worker__LabDockerHealthCheckTimeoutSeconds: ${WORKER_LAB_HEALTH_TIMEOUT:-60}
+      Worker__LabDockerHealthCheckIntervalSeconds: ${WORKER_LAB_HEALTH_INTERVAL:-1}
+      Worker__LabDockerHealthCheckRequiredConsecutiveSuccesses: ${WORKER_LAB_HEALTH_REQUIRED_SUCCESSES:-2}
+      Worker__LabDockerHealthCheckPaths: ${WORKER_LAB_HEALTH_PATHS:-/health,/swagger/v1/swagger.json,/swagger,/}
+      Worker__LabDockerBuildTimeoutSeconds: ${WORKER_LAB_BUILD_TIMEOUT:-300}
+      Worker__LabDockerDownTimeoutSeconds: ${WORKER_LAB_DOWN_TIMEOUT:-30}
+      Worker__LabDockerBuildCachePruneIntervalJobs: ${WORKER_LAB_BUILD_CACHE_PRUNE_INTERVAL_JOBS:-5}
+      Worker__LabDockerBuildCacheKeepStorage: ${WORKER_LAB_BUILD_CACHE_KEEP_STORAGE:-3GB}
+      Worker__LabDockerBuildCacheFullPruneIntervalHours: ${WORKER_LAB_BUILD_CACHE_FULL_PRUNE_INTERVAL_HOURS:-24}
+      Worker__LabDockerRemoveImagesOnCleanup: ${WORKER_LAB_REMOVE_IMAGES_ON_CLEANUP:-false}
+      Worker__LabDockerSystemPruneIntervalHours: ${WORKER_LAB_SYSTEM_PRUNE_INTERVAL_HOURS:-6}
+      Worker__LabDockerSystemPruneReclaimableThresholdGb: ${WORKER_LAB_SYSTEM_PRUNE_RECLAIMABLE_THRESHOLD_GB:-15}
+      Worker__LabDockerSystemPruneVolumes: ${WORKER_LAB_SYSTEM_PRUNE_VOLUMES:-true}
+      Worker__LabContainerMemoryLimit: ${WORKER_LAB_MEMORY_LIMIT:-512m}
+      Worker__LabContainerCpuLimit: ${WORKER_LAB_CPU_LIMIT:-1.0}
+    volumes:
+      - storage-data:/storage
+      - /var/run/docker.sock:/var/run/docker.sock
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      sqlserver:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - grading-network
+
+volumes:
+  pgdata:
+  sqlserver-data:
+  rabbitmq-data:
+  storage-data:
+
+networks:
+  grading-network:
+    driver: bridge

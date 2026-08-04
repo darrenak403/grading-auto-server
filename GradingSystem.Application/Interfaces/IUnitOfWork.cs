@@ -15,6 +15,14 @@ public interface IUnitOfWork : IDisposable
     IGenericRepository<ReviewNote> ReviewNotes { get; }
     IGenericRepository<ExportJob> ExportJobs { get; }
 
+    // Lab grading
+    IGenericRepository<Semester> Semesters { get; }
+    IGenericRepository<LabAssignment> LabAssignments { get; }
+    IGenericRepository<LabTestCase> LabTestCases { get; }
+    IGenericRepository<LabSubmission> LabSubmissions { get; }
+    IGenericRepository<LabGradingJob> LabGradingJobs { get; }
+    IGenericRepository<LabTestCaseResult> LabTestCaseResults { get; }
+
     Task<int> SaveChangesAsync(CancellationToken ct = default);
     void ClearChanges();
 }

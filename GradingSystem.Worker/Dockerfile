@@ -14,7 +14,12 @@ COPY GradingSystem.Infrastructure/   GradingSystem.Infrastructure/
 COPY GradingSystem.Worker/           GradingSystem.Worker/
 RUN dotnet publish GradingSystem.Worker/GradingSystem.Worker.csproj -c Release -o /app/publish
 
-FROM mcr.microsoft.com/playwright/dotnet:v1.52.0-noble AS final
+# Chromium + deps đã bake sẵn (cùng bản 1.52 noble — khớp Microsoft.Playwright 1.52.*)
+FROM mcr.microsoft.com/playwright:v1.52.0-noble AS playwright
+
+FROM mcr.microsoft.com/dotnet/aspnet:8.0-noble AS final
+WORKDIR /app
+
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
@@ -24,6 +29,9 @@ RUN apt-get update \
     && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
 COPY --from=build /app/publish .
+COPY --from=playwright /ms-playwright /ms-playwright
+
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+
 ENTRYPOINT ["dotnet", "GradingSystem.Worker.dll"]

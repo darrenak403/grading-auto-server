@@ -13,7 +13,7 @@ public class Submission : BaseEntity
     public string StudentCode { get; set; } = string.Empty;
     public string ArtifactZipPath { get; set; } = string.Empty;  // /storage/submissions/{Id}/artifact.zip
     public bool HasArtifact { get; set; } = true;
-    public string GradingRound { get; set; } = "Lần 1";
+    public string GradingRound { get; set; } = "Round 1";
     public SubmissionStatus Status { get; set; } = SubmissionStatus.Pending;
 
     public ICollection<GradingJob> GradingJobs { get; set; } = [];

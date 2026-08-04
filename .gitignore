@@ -367,8 +367,7 @@ MigrationBackup/
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
 
-# dotenv environment variable files
-.env
+# dotenv — docker/.env (prod), docker/.env.local (dev); mẫu: docker/.env.example
 
 # Local task files
 tasks/
@@ -393,6 +392,8 @@ PE_PRN232_GivenSolution/
 .env
 .env.local
 .env.*.local
+docker/.env
+docker/.env.local
 appsettings.Production.json
 appsettings.Development.json.local
 
@@ -411,6 +412,8 @@ sqlserver_data/
 **/.vs/
 **/.vscode/
 **/Properties/launchSettings.json
+!GradingSystem.Api/Properties/launchSettings.json
+!GradingSystem.Worker/Properties/launchSettings.json
 **/*.csproj.user
 
 # Frontend build outputs
@@ -472,3 +475,24 @@ test-*.ps1
 # package-lock.json
 # pnpm-lock.yaml
 # yarn.lock
+
+
+.claude
+
+.ck.json
+
+.mcp.json
+
+plans
+
+# my-skills generated files
+.claude/
+CLAUDE.md
+claude.md
+.codex/
+.agents/
+AGENTS.md
+agents.md
+.my-skills.lock.json
+session-data/
+global.json

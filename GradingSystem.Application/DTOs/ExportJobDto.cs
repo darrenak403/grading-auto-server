@@ -10,6 +10,8 @@ public class ExportJobDto
     public string? AssignmentCode { get; set; }
     public Guid? ExamSessionId { get; set; }
     public string? ExamSessionTitle { get; set; }
+    public Guid? LabAssignmentId { get; set; }
+    public string? LabAssignmentTitle { get; set; }
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public ExportStatus Status { get; set; }
     public string? GradingRound { get; set; }
@@ -26,4 +28,7 @@ public class CreateExportRequest
 public class CreateSessionExportRequest
 {
     public string? GradingRound { get; set; }
+    public Guid? AssignmentId { get; set; }
 }
+
+public class CreateLabExportRequest;

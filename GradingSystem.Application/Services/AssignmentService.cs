@@ -235,10 +235,18 @@ public class AssignmentService(IUnitOfWork unitOfWork, IConfiguration configurat
         }).ToList();
     }
 
-    public async Task<int> TriggerGradeAsync(Guid assignmentId, string gradingRound, CancellationToken ct = default)
+    public async Task<int> TriggerGradeAsync(
+        Guid assignmentId, string? gradingRound = null, CancellationToken ct = default)
     {
         _ = await unitOfWork.Assignments.GetByIdAsync(assignmentId)
             ?? throw new NotFoundException($"Assignment '{assignmentId}' not found.");
+
+        if (string.IsNullOrWhiteSpace(gradingRound))
+        {
+            var existingRounds = (await unitOfWork.Submissions.FindAsync(s => s.AssignmentId == assignmentId))
+                .Select(s => s.GradingRound).Distinct().ToList();
+            gradingRound = GradingRoundHelper.LatestRoundLabel(existingRounds);
+        }
 
         var submissions = (await unitOfWork.Submissions.FindAsync(
             s => s.AssignmentId == assignmentId
@@ -249,6 +257,13 @@ public class AssignmentService(IUnitOfWork unitOfWork, IConfiguration configurat
         int enqueued = 0;
         foreach (var submission in submissions)
         {
+            // Clear any stale QuestionResult rows left over from a previous grading
+            // attempt on this submission/round, so results don't accumulate across re-triggers.
+            var staleResults = await unitOfWork.QuestionResults.FindAsync(
+                qr => qr.SubmissionId == submission.Id);
+            foreach (var stale in staleResults)
+                unitOfWork.QuestionResults.Remove(stale);
+
             var job = new GradingJob
             {
                 SubmissionId = submission.Id,

@@ -1,0 +1,179 @@
+[
+  {
+    "httpMethod": "SOURCE",
+    "urlTemplate": "project-count:3",
+    "description": "Solution has 3 .csproj files (3-layer architecture)",
+    "saveTokenFrom": null,
+    "headers": null,
+    "inputJson": null,
+    "expectJson": null,
+    "expectedStatusCode": 200,
+    "matchMode": "StatusOnly",
+    "score": 0.4
+  },
+  {
+    "httpMethod": "SOURCE",
+    "urlTemplate": "file-exists:**/docker-compose.yml",
+    "description": "docker-compose.yml present in submission",
+    "saveTokenFrom": null,
+    "headers": null,
+    "inputJson": null,
+    "expectJson": null,
+    "expectedStatusCode": 200,
+    "matchMode": "StatusOnly",
+    "score": 0.4
+  },
+  {
+    "httpMethod": "SOURCE",
+    "urlTemplate": "file-exists:**/Dockerfile",
+    "description": "Dockerfile present for containerized deployment",
+    "saveTokenFrom": null,
+    "headers": null,
+    "inputJson": null,
+    "expectJson": null,
+    "expectedStatusCode": 200,
+    "matchMode": "StatusOnly",
+    "score": 0.4
+  },
+  {
+    "httpMethod": "SOURCE",
+    "urlTemplate": "file-contains:**/Validators/*.cs:AbstractValidator",
+    "description": "FluentValidation implemented with AbstractValidator",
+    "saveTokenFrom": null,
+    "headers": null,
+    "inputJson": null,
+    "expectJson": null,
+    "expectedStatusCode": 200,
+    "matchMode": "StatusOnly",
+    "score": 0.4
+  },
+  {
+    "httpMethod": "SOURCE",
+    "urlTemplate": "file-exists:**/Middleware/*Exception*.cs",
+    "description": "Global exception handling middleware exists",
+    "saveTokenFrom": null,
+    "headers": null,
+    "inputJson": null,
+    "expectJson": null,
+    "expectedStatusCode": 200,
+    "matchMode": "StatusOnly",
+    "score": 0.4
+  },
+  {
+    "httpMethod": "POST",
+    "urlTemplate": "/api/auth/login",
+    "description": "POST login returns JWT access token and refresh token",
+    "saveTokenFrom": "$.data.accessToken;$.data.refreshToken",
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "inputJson": {
+      "username": "admin",
+      "password": "123456"
+    },
+    "expectJson": {
+      "success": true
+    },
+    "expectedStatusCode": 200,
+    "matchMode": "Subset",
+    "score": 1.5
+  },
+  {
+    "httpMethod": "POST",
+    "urlTemplate": "/api/auth/refresh-token",
+    "description": "POST refresh token returns a new access token",
+    "saveTokenFrom": "$.data.accessToken",
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "inputJson": {
+      "refreshToken": "{{refreshToken}}"
+    },
+    "expectJson": {
+      "success": true
+    },
+    "expectedStatusCode": 200,
+    "matchMode": "Subset",
+    "score": 1.0
+  },
+  {
+    "httpMethod": "GET",
+    "urlTemplate": "/api/v1/students?page=1&size=5",
+    "description": "GET Students list with pagination using API v1",
+    "saveTokenFrom": null,
+    "headers": {
+      "Authorization": "Bearer {{accessToken}}"
+    },
+    "inputJson": null,
+    "expectJson": {
+      "success": true
+    },
+    "expectedStatusCode": 200,
+    "matchMode": "Subset",
+    "score": 1.0
+  },
+  {
+    "httpMethod": "GET",
+    "urlTemplate": "/api/v2/students?page=1&size=5",
+    "description": "GET Students list with pagination using API v2",
+    "saveTokenFrom": null,
+    "headers": {
+      "Authorization": "Bearer {{accessToken}}"
+    },
+    "inputJson": null,
+    "expectJson": {
+      "success": true
+    },
+    "expectedStatusCode": 200,
+    "matchMode": "Subset",
+    "score": 1.0
+  },
+  {
+    "httpMethod": "GET",
+    "urlTemplate": "/api/v1/courses?page=1&size=10",
+    "description": "GET Courses list with pagination",
+    "saveTokenFrom": null,
+    "headers": {
+      "Authorization": "Bearer {{accessToken}}"
+    },
+    "inputJson": null,
+    "expectJson": {
+      "success": true
+    },
+    "expectedStatusCode": 200,
+    "matchMode": "Subset",
+    "score": 1.0
+  },
+  {
+    "httpMethod": "GET",
+    "urlTemplate": "/api/v1/subjects?page=1&size=5",
+    "description": "GET Subjects list with pagination",
+    "saveTokenFrom": null,
+    "headers": {
+      "Authorization": "Bearer {{accessToken}}"
+    },
+    "inputJson": null,
+    "expectJson": {
+      "success": true
+    },
+    "expectedStatusCode": 200,
+    "matchMode": "Subset",
+    "score": 1.0
+  },
+  {
+    "httpMethod": "GET",
+    "urlTemplate": "/api/v1/semesters?page=1&size=5",
+    "description": "GET Semesters list with pagination",
+    "saveTokenFrom": null,
+    "headers": {
+      "Authorization": "Bearer {{accessToken}}"
+    },
+    "inputJson": null,
+    "expectJson": {
+      "success": true
+    },
+    "expectedStatusCode": 200,
+    "matchMode": "Subset",
+    "score": 1.5
+  }
+]

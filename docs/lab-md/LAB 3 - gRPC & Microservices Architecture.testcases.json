@@ -1,0 +1,237 @@
+[
+  {
+    "httpMethod": "SOURCE",
+    "urlTemplate": "project-count-at-least:4",
+    "description": "Solution has at least 4 projects for API Gateway and independent services",
+    "saveTokenFrom": null,
+    "headers": null,
+    "inputJson": null,
+    "expectJson": null,
+    "expectedStatusCode": 200,
+    "matchMode": "StatusOnly",
+    "score": 0.9
+  },
+  {
+    "httpMethod": "SOURCE",
+    "urlTemplate": "file-count-at-least:**/*.proto:1",
+    "description": "At least one Protocol Buffers .proto file is included",
+    "saveTokenFrom": null,
+    "headers": null,
+    "inputJson": null,
+    "expectJson": null,
+    "expectedStatusCode": 200,
+    "matchMode": "StatusOnly",
+    "score": 0.9
+  },
+  {
+    "httpMethod": "SOURCE",
+    "urlTemplate": "file-contains-any:**/*.csproj:Grpc.AspNetCore|Grpc.Net.Client",
+    "description": "gRPC package references are configured",
+    "saveTokenFrom": null,
+    "headers": null,
+    "inputJson": null,
+    "expectJson": null,
+    "expectedStatusCode": 200,
+    "matchMode": "StatusOnly",
+    "score": 0.8
+  },
+  {
+    "httpMethod": "SOURCE",
+    "urlTemplate": "file-contains-any:**/*.cs:AddGrpc|MapGrpcService",
+    "description": "A gRPC server is registered in application code",
+    "saveTokenFrom": null,
+    "headers": null,
+    "inputJson": null,
+    "expectJson": null,
+    "expectedStatusCode": 200,
+    "matchMode": "StatusOnly",
+    "score": 0.8
+  },
+  {
+    "httpMethod": "SOURCE",
+    "urlTemplate": "file-contains-any:**/*.cs:AddGrpcClient|GrpcChannel",
+    "description": "A strongly typed gRPC client or GrpcChannel is used",
+    "saveTokenFrom": null,
+    "headers": null,
+    "inputJson": null,
+    "expectJson": null,
+    "expectedStatusCode": 200,
+    "matchMode": "StatusOnly",
+    "score": 0.8
+  },
+  {
+    "httpMethod": "SOURCE",
+    "urlTemplate": "file-contains-any:**/*.csproj:Yarp.ReverseProxy|Ocelot",
+    "description": "API Gateway uses YARP Reverse Proxy or Ocelot",
+    "saveTokenFrom": null,
+    "headers": null,
+    "inputJson": null,
+    "expectJson": null,
+    "expectedStatusCode": 200,
+    "matchMode": "StatusOnly",
+    "score": 0.8
+  },
+  {
+    "httpMethod": "SOURCE",
+    "urlTemplate": "compose-service-count-at-least:7",
+    "description": "docker-compose defines at least gateway, 3 services, and 3 databases",
+    "saveTokenFrom": null,
+    "headers": null,
+    "inputJson": null,
+    "expectJson": null,
+    "expectedStatusCode": 200,
+    "matchMode": "StatusOnly",
+    "score": 0.9
+  },
+  {
+    "httpMethod": "SOURCE",
+    "urlTemplate": "compose-service-exists:api-gateway",
+    "description": "docker-compose includes an api-gateway service",
+    "saveTokenFrom": null,
+    "headers": null,
+    "inputJson": null,
+    "expectJson": null,
+    "expectedStatusCode": 200,
+    "matchMode": "StatusOnly",
+    "score": 0.6
+  },
+  {
+    "httpMethod": "SOURCE",
+    "urlTemplate": "file-contains-any:**/*.cs:UseSerilog|AddSerilog",
+    "description": "Serilog logging is configured",
+    "saveTokenFrom": null,
+    "headers": null,
+    "inputJson": null,
+    "expectJson": null,
+    "expectedStatusCode": 200,
+    "matchMode": "StatusOnly",
+    "score": 0.5
+  },
+  {
+    "httpMethod": "POST",
+    "urlTemplate": "/api/auth/login",
+    "description": "Login through API Gateway returns JWT access token and refresh token",
+    "saveTokenFrom": "$.data.accessToken;$.data.refreshToken",
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "inputJson": {
+      "username": "admin",
+      "password": "123456"
+    },
+    "expectJson": {
+      "success": true
+    },
+    "expectedStatusCode": 200,
+    "matchMode": "Subset",
+    "score": 0.8
+  },
+  {
+    "httpMethod": "POST",
+    "urlTemplate": "/api/auth/refresh-token",
+    "description": "Refresh token through API Gateway returns a new access token",
+    "saveTokenFrom": "$.data.accessToken",
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "inputJson": {
+      "refreshToken": "{{refreshToken}}"
+    },
+    "expectJson": {
+      "success": true
+    },
+    "expectedStatusCode": 200,
+    "matchMode": "Subset",
+    "score": 0.5
+  },
+  {
+    "httpMethod": "GET",
+    "urlTemplate": "/api/v1/students",
+    "description": "Protected Students list API is reachable through API Gateway with JWT",
+    "saveTokenFrom": null,
+    "headers": {
+      "Authorization": "Bearer {{accessToken}}"
+    },
+    "inputJson": null,
+    "expectJson": null,
+    "expectedStatusCode": 200,
+    "matchMode": "StatusOnly",
+    "score": 0.6
+  },
+  {
+    "httpMethod": "GET",
+    "urlTemplate": "/api/v1/courses",
+    "description": "Protected Courses list API is reachable through API Gateway with JWT",
+    "saveTokenFrom": null,
+    "headers": {
+      "Authorization": "Bearer {{accessToken}}"
+    },
+    "inputJson": null,
+    "expectJson": null,
+    "expectedStatusCode": 200,
+    "matchMode": "StatusOnly",
+    "score": 0.6
+  },
+  {
+    "httpMethod": "GET",
+    "urlTemplate": "/api/v1/enrollments",
+    "description": "Protected Course enrollments list API is reachable through API Gateway with JWT",
+    "saveTokenFrom": null,
+    "headers": {
+      "Authorization": "Bearer {{accessToken}}"
+    },
+    "inputJson": null,
+    "expectJson": null,
+    "expectedStatusCode": 200,
+    "matchMode": "StatusOnly",
+    "score": 0.5
+  },
+  {
+    "httpMethod": "SOURCE",
+    "urlTemplate": "file-contains-any:**/*.csproj:RabbitMQ.Client|MassTransit|EasyNetQ",
+    "description": "Bonus: RabbitMQ integration package is configured",
+    "saveTokenFrom": null,
+    "headers": null,
+    "inputJson": null,
+    "expectJson": null,
+    "expectedStatusCode": 200,
+    "matchMode": "StatusOnly",
+    "score": 0.25
+  },
+  {
+    "httpMethod": "SOURCE",
+    "urlTemplate": "file-contains-any:**/*.csproj:StackExchange.Redis|Microsoft.Extensions.Caching.StackExchangeRedis",
+    "description": "Bonus: Redis cache package is configured",
+    "saveTokenFrom": null,
+    "headers": null,
+    "inputJson": null,
+    "expectJson": null,
+    "expectedStatusCode": 200,
+    "matchMode": "StatusOnly",
+    "score": 0.25
+  },
+  {
+    "httpMethod": "SOURCE",
+    "urlTemplate": "file-contains-any:**/*.csproj:OpenTelemetry|OpenTelemetry.Extensions.Hosting|OpenTelemetry.Exporter",
+    "description": "Bonus: OpenTelemetry distributed tracing package is configured",
+    "saveTokenFrom": null,
+    "headers": null,
+    "inputJson": null,
+    "expectJson": null,
+    "expectedStatusCode": 200,
+    "matchMode": "StatusOnly",
+    "score": 0.25
+  },
+  {
+    "httpMethod": "SOURCE",
+    "urlTemplate": "file-contains-any:**/*.csproj:Polly|Microsoft.Extensions.Http.Polly",
+    "description": "Bonus: Polly circuit breaker package is configured for gRPC clients",
+    "saveTokenFrom": null,
+    "headers": null,
+    "inputJson": null,
+    "expectJson": null,
+    "expectedStatusCode": 200,
+    "matchMode": "StatusOnly",
+    "score": 0.25
+  }
+]

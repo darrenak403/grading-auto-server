@@ -1,165 +1,140 @@
-# Taskfile — PRN232 Auto Grader
-# Cài Task: https://taskfile.dev/installation/
-# Xem lệnh: task  |  task --list-all (kèm task nội bộ)
+# Dev local — https://taskfile.dev/installation/  |  BE.md
 
 version: '3'
 
-dotenv: ['.env']
-
 vars:
-  COMPOSE_DEV: docker compose -f docker-compose.dev.yml
-  COMPOSE_PROD: docker compose -f docker-compose.prod.yml
-  SOLUTION: Project.sln
+  COMPOSE: docker compose --env-file docker/.env.local -f docker/docker-compose.dev.yml
   API_DIR: GradingSystem.Api
   WORKER_DIR: GradingSystem.Worker
-  INFRA_PROJECT: GradingSystem.Infrastructure
 
 tasks:
   default:
-    desc: Gợi ý lệnh thường dùng
+    desc: Gợi ý lệnh dev
     silent: true
     cmds:
+      - task --list
       - |
-        echo "Developer (cần .env + .NET SDK):"
-        echo "  task dev:setup   — lần đầu"
-        echo "  task dev:up      — hằng ngày: bật DB/RabbitMQ"
-        echo "  task dev:api     — terminal 1"
-        echo "  task dev:worker  — terminal 2"
-        echo "  task dev:down    — tắt infra (giữ data)"
         echo ""
-        echo "User / giảng viên (chỉ Docker):"
-        echo "  task user:setup  — lần đầu"
-        echo "  task user:up     — hằng ngày"
-        echo "  task user:down   — tắt stack (giữ data)"
+        echo "Setup lần đầu:"
+        echo "  1. cp docker/.env.example docker/.env.local  (rồi điền giá trị)"
+        echo "  2. task up"
+        echo "  3. task run   (Playwright + API + Worker)"
         echo ""
-        echo "Chi tiết: RUN_FOR_DEV.md | RUN_FOR_USER.md"
+        echo "Chấm PE câu Razor (cần Playwright):"
+        echo "  1. task playwright:up   (bật Chromium CDP, tách riêng khỏi task up)"
+        echo "  2. Uncomment Playwright__BrowserCdpEndpoint trong docker/.env.local"
+        echo "  3. task worker  (hoặc restart nếu đang chạy)"
+        echo "  4. task playwright:down  khi không chấm PE nữa"
+        echo ""
+        echo "Swagger: http://localhost:5049/swagger"
+        echo "pgWeb:   http://localhost:8081"
+        echo "Rabbit:  http://localhost:15672"
 
-  # ═══════════════════════════════════════════════════════════
-  # DEVELOPER — infra Docker + API/Worker chạy trên máy
-  # ═══════════════════════════════════════════════════════════
-
-  dev:setup:
-    desc: '[Dev] Setup lần đầu (.env có sẵn) — restore, infra, Playwright, migrate'
+  up:
+    desc: Khởi động infra (Postgres, SQL Server, RabbitMQ, pgWeb)
+    deps: [_env]
     cmds:
-      - task: _dev:restore
       - mkdir -p storage
-      - task: _dev:infra-up
-      - task: _dev:infra-wait
-      - task: _dev:playwright
-      - task: _dev:migrate
-      - echo 'Xong. Hằng ngày - task dev:up, dev:api, dev:worker'
+      - '{{.COMPOSE}} up -d --no-build'
 
-  dev:up:
-    desc: '[Dev] Hằng ngày — bật Postgres, SQL Server, RabbitMQ'
+  down:
+    desc: Tắt infra
+    deps: [_env]
+    cmd: '{{.COMPOSE}} down'
+
+  clear:
+    desc: Xóa toàn bộ dev volumes (Postgres, SQL Server, RabbitMQ) để reset DB từ đầu
+    deps: [_env]
+    cmd: '{{.COMPOSE}} down -v --remove-orphans'
+
+  playwright:up:
+    desc: Khởi động Chromium CDP (cho chấm PE câu Razor) — bật riêng, không nằm trong task up
+    deps: [_env]
+    cmd: '{{.COMPOSE}} --profile playwright up -d chromium'
+
+  playwright:down:
+    desc: Tắt Chromium CDP
+    deps: [_env]
+    cmd: '{{.COMPOSE}} --profile playwright rm -sf chromium'
+
+  cache:
+    desc: Xóa toàn bộ Docker build cache
+    cmd: docker builder prune -a -f
+
+  cache:keep:
+    desc: Dọn Docker build cache nhưng giữ lại khoảng 3GB cache gần nhất
+    cmd: docker builder prune -f --keep-storage 3GB
+
+  logs:
+    desc: Xem log infra
+    deps: [_env]
+    cmd: '{{.COMPOSE}} logs -f --tail=100'
+
+  migrate:
+    desc: Chạy EF migration cho Postgres local
+    dotenv: ['docker/.env.local']
+    env:
+      ASPNETCORE_ENVIRONMENT: Development
     cmds:
-      - task: _dev:infra-up
-      - echo 'Đợi ~1 phút - task dev:api (T1) + task dev:worker (T2)'
+      - dotnet build GradingSystem.Api/GradingSystem.Api.csproj
+      - dotnet ef database update --no-build --project GradingSystem.Infrastructure --startup-project GradingSystem.Api
 
-  dev:down:
-    desc: '[Dev] Tắt infra (giữ dữ liệu DB trong volume)'
+  run:
+    desc: Chạy Playwright, API và Worker
+    deps: [_env]
     cmds:
-      - '{{.COMPOSE_DEV}} stop'
+      - task: playwright:up
+      - dotnet build Project.sln -m:1
+      - task: _apps:run
 
-  dev:api:
-    desc: '[Dev] Chạy API — http://localhost:5049/swagger'
+  api:
+    desc: Chạy API — http://localhost:5049/swagger
     dir: '{{.API_DIR}}'
     interactive: true
+    dotenv: ['../docker/.env.local']
+    env:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://localhost:5049
     cmds:
-      - dotnet run
+      - dotnet build -m:1
+      - task: _api:run
 
-  dev:worker:
-    desc: '[Dev] Chạy Worker chấm điểm'
+  worker:
+    desc: Chạy Worker (grading background service)
     dir: '{{.WORKER_DIR}}'
     interactive: true
+    dotenv: ['../docker/.env.local']
+    env:
+      ASPNETCORE_ENVIRONMENT: Development
     cmds:
-      - dotnet run
+      - dotnet build -m:1
+      - task: _worker:run
 
-  dev:reset:
-    desc: '[Dev] Xóa toàn bộ data dev (volume) rồi migrate lại — không cài lại Playwright'
-    prompt: Xóa hết database dev và migrate lại?
-    cmds:
-      - '{{.COMPOSE_DEV}} down -v'
-      - task: _dev:infra-up
-      - task: _dev:infra-wait
-      - task: _dev:migrate
-
-  # ═══════════════════════════════════════════════════════════
-  # USER — full stack trong Docker (FE + API + Worker + DB)
-  # ═══════════════════════════════════════════════════════════
-
-  user:setup:
-    desc: '[User] Setup lần đầu (.env có sẵn) — pull & chạy full stack'
-    cmds:
-      - task: _user:stack-up
-      - echo 'Đợi 2-3 phút - http://localhost:3000'
-
-  user:up:
-    desc: '[User] Hằng ngày — bật full stack'
-    cmds:
-      - task: _user:stack-up
-      - echo 'Đợi 1-2 phút - http://localhost:3000'
-
-  user:down:
-    desc: '[User] Tắt stack (giữ dữ liệu)'
-    cmds:
-      - '{{.COMPOSE_PROD}} down'
-
-  # ═══════════════════════════════════════════════════════════
-  # Nội bộ (task --list-all)
-  # ═══════════════════════════════════════════════════════════
-
-  _dev:restore:
-    internal: true
-    cmds:
-      - dotnet restore {{.SOLUTION}}
-
-  _dev:infra-up:
-    internal: true
-    cmds:
-      - '{{.COMPOSE_DEV}} up -d'
-
-  _dev:infra-wait:
-    internal: true
-    cmds:
-      - |
-        echo "Đợi PostgreSQL..."
-        for i in $(seq 1 60); do
-          if {{.COMPOSE_DEV}} exec -T postgres pg_isready -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-grading_system}" >/dev/null 2>&1; then
-            echo "PostgreSQL ready."
-            exit 0
-          fi
-          sleep 2
-        done
-        echo "PostgreSQL chưa sẵn sàng. Kiểm tra: {{.COMPOSE_DEV}} ps"
-        exit 1
-
-  _dev:migrate:
+  _api:run:
     internal: true
     dir: '{{.API_DIR}}'
-    cmds:
-      - >-
-        dotnet ef database update
-        --project ../{{.INFRA_PROJECT}}
-        --startup-project .
+    interactive: true
+    dotenv: ['../docker/.env.local']
+    env:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://localhost:5049
+    cmd: dotnet run --no-build --no-restore
 
-  _dev:playwright:
+  _worker:run:
     internal: true
-    cmds:
-      - dotnet tool install --global Microsoft.Playwright.CLI || dotnet tool update --global Microsoft.Playwright.CLI
-      - |
-        if command -v playwright >/dev/null 2>&1; then
-          playwright install chromium
-        elif [ -x "$HOME/.dotnet/tools/playwright" ]; then
-          "$HOME/.dotnet/tools/playwright" install chromium
-        elif [ -f "$USERPROFILE/.dotnet/tools/playwright.cmd" ]; then
-          "$USERPROFILE/.dotnet/tools/playwright.cmd" install chromium
-        else
-          echo "Không tìm thấy playwright CLI sau khi cài tool."
-          exit 1
-        fi
+    dir: '{{.WORKER_DIR}}'
+    interactive: true
+    dotenv: ['../docker/.env.local']
+    env:
+      ASPNETCORE_ENVIRONMENT: Development
+    cmd: dotnet run --no-build --no-restore
 
-  _user:stack-up:
+  _apps:run:
     internal: true
-    cmds:
-      - '{{.COMPOSE_PROD}} pull'
-      - '{{.COMPOSE_PROD}} up -d'
+    deps: [_api:run, _worker:run]
+
+  _env:
+    internal: true
+    preconditions:
+      - sh: test -f docker/.env.local
+        msg: 'Thiếu docker/.env.local — chạy: cp docker/.env.example docker/.env.local'

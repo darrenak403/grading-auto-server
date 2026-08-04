@@ -1,0 +1,122 @@
+[
+{
+"httpMethod": "SOURCE",
+"urlTemplate": "project-count:3",
+"description": "Solution has 3 .csproj files (3-layer architecture)",
+"inputJson": null,
+"expectJson": null,
+"expectedStatusCode": 200,
+"matchMode": "StatusOnly",
+"score": 0.5
+},
+{
+"httpMethod": "SOURCE",
+"urlTemplate": "file-exists:**/docker-compose.yml",
+"description": "docker-compose.yml present in submission",
+"inputJson": null,
+"expectJson": null,
+"expectedStatusCode": 200,
+"matchMode": "StatusOnly",
+"score": 0.5
+},
+{
+"httpMethod": "SOURCE",
+"urlTemplate": "project-name:PRN232.*.API",
+"description": "Solution matches naming convention PRN232.[ProjectName].API",
+"inputJson": null,
+"expectJson": null,
+"expectedStatusCode": 200,
+"matchMode": "StatusOnly",
+"score": 0.5
+},
+{
+"httpMethod": "SOURCE",
+"urlTemplate": "file-exists:**/Dockerfile",
+"description": "Dockerfile present for containerizing the API application",
+"inputJson": null,
+"expectJson": null,
+"expectedStatusCode": 200,
+"matchMode": "StatusOnly",
+"score": 0.5
+},
+{
+"httpMethod": "GET",
+"urlTemplate": "/api/students?search=nguyen&sort=fullName,-dateOfBirth&page=2&size=10&fields=studentId,fullName,email",
+"description": "GET student collection with mandatory search, sort, paging, and field selection parameters",
+"inputJson": null,
+"expectJson": "{"success":true}",
+"expectedStatusCode": 200,
+"matchMode": "Subset",
+"score": 1.5
+},
+{
+"httpMethod": "GET",
+"urlTemplate": "/api/students/1",
+"description": "GET single student details by explicit seed ID",
+"inputJson": null,
+"expectJson": "{"success":true}",
+"expectedStatusCode": 200,
+"matchMode": "Subset",
+"score": 0.5
+},
+{
+"httpMethod": "GET",
+"urlTemplate": "/api/enrollments?search=active&sort=-enrollDate&page=1&size=20&fields=enrollmentId,status&expand=student,course",
+"description": "GET enrollment list ensuring search, sort, pagination, selection, and expansion function simultaneously",
+"inputJson": null,
+"expectJson": "{"success":true}",
+"expectedStatusCode": 200,
+"matchMode": "Subset",
+"score": 1.5
+},
+{
+"httpMethod": "POST",
+"urlTemplate": "/api/enrollments",
+"description": "POST create a new enrollment entity mapping to business/request definitions",
+"inputJson": "{"studentId":1,"courseId":1,"enrollDate":"2026-05-27T10:00:00Z","status":"Active"}",
+"expectJson": "{"success":true}",
+"expectedStatusCode": 201,
+"matchMode": "Subset",
+"score": 1.5
+},
+{
+"httpMethod": "GET",
+"urlTemplate": "/api/courses?page=1&size=10",
+"description": "GET list of courses including dynamic page metadata values",
+"inputJson": null,
+"expectJson": "{"success":true}",
+"expectedStatusCode": 200,
+"matchMode": "Subset",
+"score": 1.0
+},
+{
+"httpMethod": "POST",
+"urlTemplate": "/api/courses",
+"description": "POST create a new course structure attached to a specific semester ID",
+"inputJson": "{"courseName":"Advanced REST Architecture","semesterId":1}",
+"expectJson": "{"success":true}",
+"expectedStatusCode": 201,
+"matchMode": "Subset",
+"score": 1.0
+},
+{
+"httpMethod": "GET",
+"urlTemplate": "/api/subjects?page=1&size=10",
+"description": "GET collection of curricular subjects using uniform response structure",
+"inputJson": null,
+"expectJson": "{"success":true}",
+"expectedStatusCode": 200,
+"matchMode": "Subset",
+"score": 0.5
+},
+{
+"httpMethod": "GET",
+"urlTemplate": "/api/semesters?page=1&size=5",
+"description": "GET list of academic planning semesters with generic data format verification",
+"inputJson": null,
+"expectJson": "{"success":true}",
+"expectedStatusCode": 200,
+"matchMode": "Subset",
+"score": 0.5
+}
+]

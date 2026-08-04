@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -12,15 +11,18 @@ using Microsoft.Extensions.Options;
 
 namespace GradingSystem.Worker.Services;
 
-public class TestRunner(ILogger<TestRunner> logger, IOptions<WorkerOptions> workerOpts)
+public class TestRunner(
+    ILogger<TestRunner> logger,
+    IOptions<WorkerOptions> workerOpts,
+    IOptions<PlaywrightOptions> playwrightOpts)
 {
     private static readonly JsonSerializerOptions _jsonOpts =
         new(JsonSerializerDefaults.Web); // PropertyNameCaseInsensitive = true, no AOT issue
 
-    private readonly NewmanLaunch? _newman = ResolveNewman(workerOpts.Value, logger);
     private readonly string _bindHost = workerOpts.Value.BindHost;
+    private readonly PlaywrightOptions _playwright = playwrightOpts.Value;
 
-    public async Task RunAsync(GradingJob job, StudentContext ctx, IUnitOfWork uow, CancellationToken ct)
+    public virtual async Task RunAsync(GradingJob job, StudentContext ctx, IUnitOfWork uow, CancellationToken ct)
     {
         var questions = (await uow.Questions.FindAsync(q => q.AssignmentId == job.Submission.AssignmentId))
                         .OrderBy(q => q.CreatedAt).ToList();
@@ -82,7 +84,7 @@ public class TestRunner(ILogger<TestRunner> logger, IOptions<WorkerOptions> work
         await uow.SaveChangesAsync(ct);
     }
 
-    // ── Q1: API question — newman for HTTP test cases, swagger for schema-only cases ──
+    // ── Q1: API question — direct HTTP runner for HTTP test cases, swagger for schema-only cases ──
 
     private async Task<List<TestCaseResult>> RunApiCasesAsync(
         List<TestCase> testCases, int port, HttpClient client, CancellationToken ct)
@@ -108,35 +110,9 @@ public class TestRunner(ILogger<TestRunner> logger, IOptions<WorkerOptions> work
         logger.LogInformation("Swagger fetch {Url}: {Result}", swaggerUrl,
             swaggerDoc != null ? "OK" : fetchError);
 
-        // Prefer direct HTTP runner for all HTTP cases (including expected body checks).
-        // Keep swagger-only checks separate.
-        var newmanCases = new List<TestCase>();
-        var directCases = new List<TestCase>();
-
-        foreach (var tc in testCases)
-        {
-            var expect = DeserializeExpect(tc.ExpectJson);
-            bool hasBody = expect.Body.HasValue && expect.Body.Value.ValueKind != JsonValueKind.Undefined
-                           && expect.Body.Value.ValueKind != JsonValueKind.Null;
-            bool isHttpCase = expect.Status != null || tc.InputJson != null || hasBody;
-
-            if (isHttpCase)
-                directCases.Add(tc);
-            else
-                directCases.Add(tc); // swagger-only
-        }
-
         var results = new List<TestCaseResult>(testCases.Count);
 
-        // Run newman cases
-        if (newmanCases.Count > 0)
-        {
-            var newmanResults = await RunNewmanCasesAsync(newmanCases, port, _bindHost, ct);
-            results.AddRange(newmanResults);
-        }
-
-        // Run direct / swagger cases
-        foreach (var tc in directCases)
+        foreach (var tc in testCases)
         {
             var expect = DeserializeExpect(tc.ExpectJson);
             bool isHttpCase = expect.Status != null || tc.InputJson != null;
@@ -147,254 +123,6 @@ public class TestRunner(ILogger<TestRunner> logger, IOptions<WorkerOptions> work
                 results.Add(EvaluateSwaggerCase(tc, swaggerDoc, swaggerUrl));
             else
                 results.Add(FailResult(tc, swaggerUrl, fetchError!));
-        }
-
-        return results;
-    }
-
-    // ── Newman runner ──
-
-    private async Task<List<TestCaseResult>> RunNewmanCasesAsync(
-        List<TestCase> testCases, int port, string bindHost, CancellationToken ct)
-    {
-        var collectionPath = Path.Combine(Path.GetTempPath(), $"newman-col-{Guid.NewGuid():N}.json");
-        var reportPath     = Path.Combine(Path.GetTempPath(), $"newman-rep-{Guid.NewGuid():N}.json");
-
-        try
-        {
-            if (_newman is null)
-            {
-                const string hint =
-                    "Newman CLI not found. Install: npm install -g newman, ensure Node is on PATH, or set Worker:NewmanExecutable to the full path of newman.cmd.";
-                return testCases.Select(tc =>
-                        FailResult(tc, $"http://{bindHost}:{port}{tc.UrlTemplate}", hint))
-                    .ToList();
-            }
-
-            var collection = BuildPostmanCollection(testCases, port, bindHost);
-            await File.WriteAllTextAsync(collectionPath, collection, ct);
-
-            var tail =
-                $"run \"{collectionPath}\" --reporters json --reporter-json-export \"{reportPath}\" --timeout-request 10000";
-            var args = _newman.Value.UseNpx ? $"--yes newman {tail}" : tail;
-            var (exitCode, stdout, stderr) = await RunProcessAsync(_newman.Value.ExecutablePath, args, ct);
-
-            logger.LogInformation("newman exit {Code}: {Stderr}", exitCode, stderr?.Length > 200 ? stderr[..200] : stderr);
-
-            if (!File.Exists(reportPath))
-                return testCases.Select(tc => FailResult(tc, $"http://{bindHost}:{port}{tc.UrlTemplate}", "newman did not produce report")).ToList();
-
-            var reportJson = await File.ReadAllTextAsync(reportPath, ct);
-            return ParseNewmanReport(testCases, reportJson, port, bindHost);
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "newman failed");
-            return testCases.Select(tc => FailResult(tc, $"http://{bindHost}:{port}{tc.UrlTemplate}", $"newman error: {ex.Message}")).ToList();
-        }
-        finally
-        {
-            TryDelete(collectionPath);
-            TryDelete(reportPath);
-        }
-    }
-
-    private static string BuildPostmanCollection(List<TestCase> testCases, int port, string bindHost)
-    {
-        var items = new JsonArray();
-
-        foreach (var tc in testCases)
-        {
-            var expect = DeserializeExpect(tc.ExpectJson);
-            var url = $"http://{bindHost}:{port}{tc.UrlTemplate}";
-
-            var httpMethod = tc.HttpMethod.ToUpperInvariant();
-            var isGetOrDelete = httpMethod == "GET" || httpMethod == "DELETE";
-            var requestObj = new JsonObject
-            {
-                ["method"] = httpMethod,
-                ["header"] = isGetOrDelete
-                    ? new JsonArray { new JsonObject { ["key"] = "Accept", ["value"] = "application/json" } }
-                    : new JsonArray
-                    {
-                        new JsonObject { ["key"] = "Content-Type", ["value"] = "application/json" },
-                        new JsonObject { ["key"] = "Accept",       ["value"] = "application/json" }
-                    },
-                ["url"] = new JsonObject { ["raw"] = url }
-            };
-
-            if (tc.InputJson != null)
-            {
-                if (isGetOrDelete)
-                {
-                    var qs = JsonToQueryString(tc.InputJson);
-                    ((JsonObject)requestObj["url"]!)["raw"] = url + "?" + qs;
-                }
-                else
-                {
-                    requestObj["body"] = new JsonObject
-                    {
-                        ["mode"] = "raw",
-                        ["raw"] = tc.InputJson
-                    };
-                }
-            }
-            else
-            {
-                if (httpMethod == "POST" || httpMethod == "PUT" || httpMethod == "PATCH")
-                {
-                    requestObj["body"] = new JsonObject
-                    {
-                        ["mode"] = "raw",
-                        ["raw"] = "{}"
-                    };
-                }
-            }
-
-            var tests = new StringBuilder();
-            if (expect.Status.HasValue)
-                tests.AppendLine($"pm.test('status {expect.Status}', function() {{ var code = pm.response ? pm.response.code : undefined; pm.expect(code).to.eql({expect.Status}); }});");
-
-            if (expect.Body.HasValue && expect.Body.Value.ValueKind != JsonValueKind.Undefined
-                && expect.Body.Value.ValueKind != JsonValueKind.Null)
-            {
-                var expectedBodyJson = expect.Body.Value.GetRawText();
-                tests.AppendLine($"pm.test('body match', function() {{");
-                tests.AppendLine($"  if (!pm.response) {{ pm.expect.fail('No response received'); return; }}");
-                tests.AppendLine($"  var text; try {{ text = pm.response.text(); }} catch(e) {{ text = null; }}");
-                tests.AppendLine($"  if (text == null) {{ pm.expect.fail('Empty or no response body'); return; }}");
-                tests.AppendLine($"  var res; try {{ res = JSON.parse(text); }} catch(e) {{ pm.expect.fail('Not JSON: ' + String(text).substring(0, 100)); return; }}");
-                tests.AppendLine($"  var expected = {expectedBodyJson};");
-                tests.AppendLine($"  pm.expect(res).to.deep.equal(expected);");
-                tests.AppendLine($"}});");
-            }
-
-            var item = new JsonObject
-            {
-                ["name"] = tc.Name,
-                ["request"] = requestObj,
-                ["event"] = new JsonArray
-                {
-                    new JsonObject
-                    {
-                        ["listen"] = "test",
-                        ["script"] = new JsonObject
-                        {
-                            ["exec"] = new JsonArray { tests.ToString() },
-                            ["type"] = "text/javascript"
-                        }
-                    }
-                }
-            };
-
-            items.Add(item);
-        }
-
-        var collection = new JsonObject
-        {
-            ["info"] = new JsonObject
-            {
-                ["name"] = "GradingCollection",
-                ["schema"] = "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
-            },
-            ["item"] = items
-        };
-
-        return collection.ToJsonString();
-    }
-
-    private static List<TestCaseResult> ParseNewmanReport(List<TestCase> testCases, string reportJson, int port, string bindHost)
-    {
-        var results = new List<TestCaseResult>(testCases.Count);
-
-        try
-        {
-            using var doc = JsonDocument.Parse(reportJson);
-            var root = doc.RootElement;
-
-            // newman report: run.executions[]
-            JsonElement executions = default;
-            bool found = false;
-            if (root.TryGetProperty("run", out var run) && run.TryGetProperty("executions", out executions))
-                found = true;
-
-            if (!found)
-            {
-                return testCases.Select(tc =>
-                    FailResult(tc, $"http://{bindHost}:{port}{tc.UrlTemplate}", "newman report missing executions")).ToList();
-            }
-
-            var executionList = executions.EnumerateArray().ToList();
-
-            for (int i = 0; i < testCases.Count; i++)
-            {
-                var tc = testCases[i];
-                var url = $"http://{bindHost}:{port}{tc.UrlTemplate}";
-
-                if (i >= executionList.Count)
-                {
-                    results.Add(FailResult(tc, url, "newman execution missing for this test case"));
-                    continue;
-                }
-
-                var exec = executionList[i];
-                int actualStatus = 0;
-                string? actualBody = null;
-                string? failReason = null;
-
-                // Newman 6.x runs test scripts even on request failure; detect it early
-                if (exec.TryGetProperty("requestError", out var reqErr) && reqErr.ValueKind != JsonValueKind.Null)
-                {
-                    var errMsg = reqErr.ValueKind == JsonValueKind.Object
-                        ? FormatRequestError(reqErr)
-                        : reqErr.ToString();
-                    results.Add(FailResult(tc, url, $"Request error: {errMsg}"));
-                    continue;
-                }
-
-                if (exec.TryGetProperty("response", out var resp))
-                {
-                    if (resp.TryGetProperty("code", out var code))
-                        actualStatus = code.GetInt32();
-                    if (resp.TryGetProperty("body", out var bodyEl))
-                        actualBody = bodyEl.GetString();
-                }
-
-                // Collect test failures
-                var failures = new List<string>();
-                if (exec.TryGetProperty("assertions", out var assertions))
-                {
-                    foreach (var assertion in assertions.EnumerateArray())
-                    {
-                        if (assertion.TryGetProperty("error", out var err))
-                        {
-                            var msg = err.TryGetProperty("message", out var m) ? m.GetString() : "assertion failed";
-                            failures.Add(msg ?? "assertion failed");
-                        }
-                    }
-                }
-
-                if (failures.Count > 0)
-                    failReason = string.Join("; ", failures);
-
-                bool pass = failReason == null;
-                results.Add(new TestCaseResult
-                {
-                    TestCaseId = tc.Id,
-                    Pass = pass,
-                    AwardedScore = pass ? tc.Score : 0,
-                    HttpMethod = tc.HttpMethod,
-                    Url = url,
-                    ActualStatus = actualStatus,
-                    ActualBody = actualBody?.Length > 500 ? actualBody[..500] : actualBody,
-                    FailReason = failReason,
-                });
-            }
-        }
-        catch (Exception ex)
-        {
-            return testCases.Select(tc =>
-                FailResult(tc, $"http://{bindHost}:{port}{tc.UrlTemplate}", $"parse newman report error: {ex.Message}")).ToList();
         }
 
         return results;
@@ -639,11 +367,16 @@ public class TestRunner(ILogger<TestRunner> logger, IOptions<WorkerOptions> work
 
     // ── Q2: Playwright runner ──
 
+    private string PlaywrightTestHost =>
+        string.IsNullOrWhiteSpace(_playwright.BrowserCdpEndpoint)
+            ? _bindHost
+            : _playwright.ArtifactHostFromBrowser;
+
     private async Task<List<TestCaseResult>> RunPlaywrightCasesAsync(
         List<TestCase> testCases, int port, CancellationToken ct)
     {
         using var playwright = await Playwright.CreateAsync();
-        await using var browser = await playwright.Chromium.LaunchAsync(new() { Headless = true });
+        await using var browser = await ConnectOrLaunchBrowserAsync(playwright);
         await using var browserContext = await browser.NewContextAsync();
         var apiContext = browserContext.APIRequest;
 
@@ -656,13 +389,25 @@ public class TestRunner(ILogger<TestRunner> logger, IOptions<WorkerOptions> work
         return results;
     }
 
+    private async Task<IBrowser> ConnectOrLaunchBrowserAsync(IPlaywright playwright)
+    {
+        var cdp = _playwright.BrowserCdpEndpoint?.Trim();
+        if (!string.IsNullOrEmpty(cdp))
+        {
+            logger.LogInformation("Playwright: connecting over CDP to {Endpoint}", cdp);
+            return await playwright.Chromium.ConnectOverCDPAsync(cdp);
+        }
+
+        return await playwright.Chromium.LaunchAsync(new() { Headless = true });
+    }
+
     private async Task<TestCaseResult> RunPlaywrightTestCaseAsync(
         TestCase tc, int port,
         IBrowserContext browserContext, IAPIRequestContext apiContext,
         Dictionary<string, string> context, CancellationToken ct)
     {
         var urlPath = InterpolateVariables(tc.UrlTemplate, context);
-        var url = $"http://{_bindHost}:{port}{urlPath}";
+        var url = $"http://{PlaywrightTestHost}:{port}{urlPath}";
         var inputJson = tc.InputJson != null ? InterpolateVariables(tc.InputJson, context) : null;
 
         var expect = DeserializeExpect(tc.ExpectJson);
@@ -882,135 +627,4 @@ public class TestRunner(ILogger<TestRunner> logger, IOptions<WorkerOptions> work
             Uri.EscapeDataString(kv.Key) + "=" + Uri.EscapeDataString(kv.Value?.ToString() ?? "")));
     }
 
-    private static string FormatRequestError(JsonElement requestError)
-    {
-        var parts = new List<string>();
-        if (requestError.TryGetProperty("message", out var message) && message.ValueKind == JsonValueKind.String)
-            parts.Add(message.GetString()!);
-        if (requestError.TryGetProperty("code", out var code) && code.ValueKind == JsonValueKind.String)
-            parts.Add($"code={code.GetString()}");
-        if (requestError.TryGetProperty("name", out var name) && name.ValueKind == JsonValueKind.String)
-            parts.Add($"name={name.GetString()}");
-
-        if (parts.Count > 0)
-            return string.Join(", ", parts);
-
-        var raw = requestError.GetRawText();
-        return string.IsNullOrWhiteSpace(raw) || raw == "{}"
-            ? "Unknown request error"
-            : raw;
-    }
-
-    private readonly struct NewmanLaunch(string executablePath, bool useNpx)
-    {
-        public string ExecutablePath { get; } = executablePath;
-        public bool UseNpx { get; } = useNpx;
-    }
-
-    private static NewmanLaunch? ResolveNewman(WorkerOptions opts, ILogger logger)
-    {
-        var configured = opts.NewmanExecutable?.Trim();
-        if (!string.IsNullOrEmpty(configured))
-        {
-            if (File.Exists(configured))
-                return new NewmanLaunch(configured, false);
-            logger.LogWarning(
-                "Worker:NewmanExecutable '{Path}' not found — searching PATH / npx",
-                configured);
-        }
-
-        var fromPath = FindExecutableOnPath("newman");
-        if (fromPath is not null)
-            return new NewmanLaunch(fromPath, false);
-
-        if (OperatingSystem.IsWindows())
-        {
-            var appDataNpm = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "npm",
-                "newman.cmd");
-            if (File.Exists(appDataNpm))
-                return new NewmanLaunch(appDataNpm, false);
-        }
-
-        var npx = FindExecutableOnPath("npx");
-        if (npx is not null)
-            return new NewmanLaunch(npx, true);
-
-        if (OperatingSystem.IsWindows())
-        {
-            var programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
-            var npxPf = Path.Combine(programFiles, "nodejs", "npx.cmd");
-            if (File.Exists(npxPf))
-                return new NewmanLaunch(npxPf, true);
-
-            var pf86 = Environment.GetEnvironmentVariable("ProgramFiles(x86)");
-            if (!string.IsNullOrEmpty(pf86))
-            {
-                var npx86 = Path.Combine(pf86, "nodejs", "npx.cmd");
-                if (File.Exists(npx86))
-                    return new NewmanLaunch(npx86, true);
-            }
-        }
-
-        logger.LogWarning(
-            "Newman not resolved: not on PATH, not under %AppData%\\npm, and npx not found.");
-        return null;
-    }
-
-    private static string? FindExecutableOnPath(string nameWithoutExtension)
-    {
-        var path = Environment.GetEnvironmentVariable("PATH");
-        if (string.IsNullOrEmpty(path))
-            return null;
-
-        IEnumerable<string> names = OperatingSystem.IsWindows()
-            ?
-            [
-                $"{nameWithoutExtension}.exe",
-                $"{nameWithoutExtension}.cmd",
-                $"{nameWithoutExtension}.bat",
-                nameWithoutExtension,
-            ]
-            : [nameWithoutExtension, $"{nameWithoutExtension}.exe"];
-
-        foreach (var segment in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
-        {
-            var dir = segment.Trim().Trim('"');
-            if (string.IsNullOrEmpty(dir))
-                continue;
-
-            foreach (var n in names)
-            {
-                var candidate = Path.Combine(dir, n);
-                if (File.Exists(candidate))
-                    return candidate;
-            }
-        }
-
-        return null;
-    }
-
-    private static async Task<(int exitCode, string stdout, string stderr)> RunProcessAsync(
-        string fileName, string arguments, CancellationToken ct)
-    {
-        var psi = new ProcessStartInfo(fileName, arguments)
-        {
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-        };
-
-        using var process = Process.Start(psi)!;
-        var stdout = await process.StandardOutput.ReadToEndAsync(ct);
-        var stderr = await process.StandardError.ReadToEndAsync(ct);
-        await process.WaitForExitAsync(ct);
-        return (process.ExitCode, stdout, stderr);
-    }
-
-    private static void TryDelete(string path)
-    {
-        try { if (File.Exists(path)) File.Delete(path); } catch { /* best effort */ }
-    }
 }

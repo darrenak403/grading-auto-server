@@ -122,6 +122,9 @@ namespace GradingSystem.Infrastructure.Persistence.Migrations
                     b.Property<string>("GradingRound")
                         .HasColumnType("text");
 
+                    b.Property<Guid?>("LabAssignmentId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasColumnType("text");
@@ -134,6 +137,8 @@ namespace GradingSystem.Infrastructure.Persistence.Migrations
                     b.HasIndex("AssignmentId");
 
                     b.HasIndex("ExamSessionId");
+
+                    b.HasIndex("LabAssignmentId");
 
                     b.ToTable("ExportJobs");
                 });
@@ -176,6 +181,237 @@ namespace GradingSystem.Infrastructure.Persistence.Migrations
                     b.HasIndex("SubmissionId");
 
                     b.ToTable("GradingJobs");
+                });
+
+            modelBuilder.Entity("GradingSystem.Domain.Entities.LabAssignment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Description")
+                        .HasColumnType("text");
+
+                    b.Property<string>("PdfPath")
+                        .HasColumnType("text");
+
+                    b.Property<Guid?>("SemesterId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SemesterId");
+
+                    b.ToTable("LabAssignments");
+                });
+
+            modelBuilder.Entity("GradingSystem.Domain.Entities.LabGradingJob", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("FinishedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("LabSubmissionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("StartedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LabSubmissionId");
+
+                    b.ToTable("LabGradingJobs");
+                });
+
+            modelBuilder.Entity("GradingSystem.Domain.Entities.LabSubmission", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("FilePath")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("LabAssignmentId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("OriginalFileName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("StudentCode")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LabAssignmentId", "StudentCode")
+                        .IsUnique();
+
+                    b.ToTable("LabSubmissions");
+                });
+
+            modelBuilder.Entity("GradingSystem.Domain.Entities.LabTestCase", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("AiGenerated")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Description")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ExpectJson")
+                        .HasColumnType("text");
+
+                    b.Property<int>("ExpectedStatusCode")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("HeadersJson")
+                        .HasColumnType("text");
+
+                    b.Property<string>("HttpMethod")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)");
+
+                    b.Property<string>("InputJson")
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("LabAssignmentId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("MatchMode")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("Order")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("SaveTokenFrom")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<decimal>("Score")
+                        .HasPrecision(5, 2)
+                        .HasColumnType("numeric(5,2)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("UrlTemplate")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LabAssignmentId");
+
+                    b.ToTable("LabTestCases");
+                });
+
+            modelBuilder.Entity("GradingSystem.Domain.Entities.LabTestCaseResult", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ActualResponse")
+                        .HasColumnType("text");
+
+                    b.Property<int?>("ActualStatusCode")
+                        .HasColumnType("integer");
+
+                    b.Property<decimal>("AwardedScore")
+                        .HasPrecision(5, 2)
+                        .HasColumnType("numeric(5,2)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("LabGradingJobId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("LabTestCaseId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal?>("ManualOverrideScore")
+                        .HasPrecision(5, 2)
+                        .HasColumnType("numeric(5,2)");
+
+                    b.Property<string>("OverrideReason")
+                        .HasColumnType("text");
+
+                    b.Property<bool>("Passed")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LabGradingJobId");
+
+                    b.HasIndex("LabTestCaseId");
+
+                    b.ToTable("LabTestCaseResults");
                 });
 
             modelBuilder.Entity("GradingSystem.Domain.Entities.Participant", b =>
@@ -270,8 +506,9 @@ namespace GradingSystem.Infrastructure.Persistence.Migrations
                     b.Property<string>("AdjustedBy")
                         .HasColumnType("text");
 
-                    b.Property<int?>("AdjustedScore")
-                        .HasColumnType("integer");
+                    b.Property<decimal?>("AdjustedScore")
+                        .HasPrecision(10, 2)
+                        .HasColumnType("numeric(10,2)");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -288,8 +525,9 @@ namespace GradingSystem.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("QuestionId")
                         .HasColumnType("uuid");
 
-                    b.Property<int>("Score")
-                        .HasColumnType("integer");
+                    b.Property<decimal>("Score")
+                        .HasPrecision(10, 2)
+                        .HasColumnType("numeric(10,2)");
 
                     b.Property<Guid>("SubmissionId")
                         .HasColumnType("uuid");
@@ -338,6 +576,42 @@ namespace GradingSystem.Infrastructure.Persistence.Migrations
                         .IsUnique();
 
                     b.ToTable("ReviewNotes");
+                });
+
+            modelBuilder.Entity("GradingSystem.Domain.Entities.Semester", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateOnly?>("EndDate")
+                        .HasColumnType("date");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateOnly?>("StartDate")
+                        .HasColumnType("date");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Code")
+                        .IsUnique();
+
+                    b.ToTable("Semesters");
                 });
 
             modelBuilder.Entity("GradingSystem.Domain.Entities.Submission", b =>
@@ -422,8 +696,9 @@ namespace GradingSystem.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("QuestionId")
                         .HasColumnType("uuid");
 
-                    b.Property<int>("Score")
-                        .HasColumnType("integer");
+                    b.Property<decimal>("Score")
+                        .HasPrecision(10, 2)
+                        .HasColumnType("numeric(10,2)");
 
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -459,9 +734,15 @@ namespace GradingSystem.Infrastructure.Persistence.Migrations
                         .WithMany()
                         .HasForeignKey("ExamSessionId");
 
+                    b.HasOne("GradingSystem.Domain.Entities.LabAssignment", "LabAssignment")
+                        .WithMany()
+                        .HasForeignKey("LabAssignmentId");
+
                     b.Navigation("Assignment");
 
                     b.Navigation("ExamSession");
+
+                    b.Navigation("LabAssignment");
                 });
 
             modelBuilder.Entity("GradingSystem.Domain.Entities.GradingJob", b =>
@@ -473,6 +754,68 @@ namespace GradingSystem.Infrastructure.Persistence.Migrations
                         .IsRequired();
 
                     b.Navigation("Submission");
+                });
+
+            modelBuilder.Entity("GradingSystem.Domain.Entities.LabAssignment", b =>
+                {
+                    b.HasOne("GradingSystem.Domain.Entities.Semester", "Semester")
+                        .WithMany("LabAssignments")
+                        .HasForeignKey("SemesterId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Semester");
+                });
+
+            modelBuilder.Entity("GradingSystem.Domain.Entities.LabGradingJob", b =>
+                {
+                    b.HasOne("GradingSystem.Domain.Entities.LabSubmission", "LabSubmission")
+                        .WithMany("GradingJobs")
+                        .HasForeignKey("LabSubmissionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("LabSubmission");
+                });
+
+            modelBuilder.Entity("GradingSystem.Domain.Entities.LabSubmission", b =>
+                {
+                    b.HasOne("GradingSystem.Domain.Entities.LabAssignment", "LabAssignment")
+                        .WithMany("Submissions")
+                        .HasForeignKey("LabAssignmentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("LabAssignment");
+                });
+
+            modelBuilder.Entity("GradingSystem.Domain.Entities.LabTestCase", b =>
+                {
+                    b.HasOne("GradingSystem.Domain.Entities.LabAssignment", "LabAssignment")
+                        .WithMany("TestCases")
+                        .HasForeignKey("LabAssignmentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("LabAssignment");
+                });
+
+            modelBuilder.Entity("GradingSystem.Domain.Entities.LabTestCaseResult", b =>
+                {
+                    b.HasOne("GradingSystem.Domain.Entities.LabGradingJob", "LabGradingJob")
+                        .WithMany("Results")
+                        .HasForeignKey("LabGradingJobId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("GradingSystem.Domain.Entities.LabTestCase", "LabTestCase")
+                        .WithMany()
+                        .HasForeignKey("LabTestCaseId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("LabGradingJob");
+
+                    b.Navigation("LabTestCase");
                 });
 
             modelBuilder.Entity("GradingSystem.Domain.Entities.Participant", b =>
@@ -585,6 +928,23 @@ namespace GradingSystem.Infrastructure.Persistence.Migrations
                     b.Navigation("Participants");
                 });
 
+            modelBuilder.Entity("GradingSystem.Domain.Entities.LabAssignment", b =>
+                {
+                    b.Navigation("Submissions");
+
+                    b.Navigation("TestCases");
+                });
+
+            modelBuilder.Entity("GradingSystem.Domain.Entities.LabGradingJob", b =>
+                {
+                    b.Navigation("Results");
+                });
+
+            modelBuilder.Entity("GradingSystem.Domain.Entities.LabSubmission", b =>
+                {
+                    b.Navigation("GradingJobs");
+                });
+
             modelBuilder.Entity("GradingSystem.Domain.Entities.Participant", b =>
                 {
                     b.Navigation("Submissions");
@@ -593,6 +953,11 @@ namespace GradingSystem.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("GradingSystem.Domain.Entities.Question", b =>
                 {
                     b.Navigation("TestCases");
+                });
+
+            modelBuilder.Entity("GradingSystem.Domain.Entities.Semester", b =>
+                {
+                    b.Navigation("LabAssignments");
                 });
 
             modelBuilder.Entity("GradingSystem.Domain.Entities.Submission", b =>

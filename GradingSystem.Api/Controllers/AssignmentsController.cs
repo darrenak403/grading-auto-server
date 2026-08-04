@@ -103,29 +103,37 @@ public class AssignmentsController(IAssignmentService assignmentService, IBulkUp
 
     [HttpPost("assignments/{id:guid}/bulk-upload")]
     [Consumes("multipart/form-data")]
-    [RequestSizeLimit(200 * 1024 * 1024)]
-    [RequestFormLimits(MultipartBodyLengthLimit = 200 * 1024 * 1024)]
-    public async Task<IActionResult> BulkUploadAsync(
-        Guid id,
-        IFormFile file,
-        [FromForm] string gradingRound = "Lần 1",
-        CancellationToken ct = default)
+    [RequestSizeLimit(UploadLimits.MaxBulkUploadBytes)]
+    [RequestFormLimits(MultipartBodyLengthLimit = UploadLimits.MaxBulkUploadBytes)]
+    public async Task<IActionResult> BulkUploadAsync(Guid id, IFormFile file, CancellationToken ct = default)
     {
         if (file is null || file.Length == 0)
             return BadRequest("Master zip file is required.");
 
         await using var stream = file.OpenReadStream();
-        var result = await bulkUploadService.ParseAndCreateAsync(id, gradingRound, stream, ct);
+        var result = await bulkUploadService.ParseAndCreateForLatestRoundAsync(id, stream, ct);
         return Ok(result, $"Bulk upload complete: {result.Created} created, {result.Missing} missing.");
+    }
+
+    [HttpPost("assignments/{id:guid}/rounds")]
+    [Consumes("multipart/form-data")]
+    [RequestSizeLimit(UploadLimits.MaxBulkUploadBytes)]
+    [RequestFormLimits(MultipartBodyLengthLimit = UploadLimits.MaxBulkUploadBytes)]
+    public async Task<IActionResult> CreateRoundAsync(Guid id, IFormFile file, CancellationToken ct)
+    {
+        if (file is null || file.Length == 0)
+            return BadRequest("Master zip file is required.");
+
+        await using var stream = file.OpenReadStream();
+        var result = await bulkUploadService.CreateNewRoundAsync(id, stream, ct);
+        return Ok(result, $"New grading round created: {result.Created} created, {result.Missing} missing.");
     }
 
     [HttpPost("assignments/{id:guid}/grade")]
     public async Task<IActionResult> TriggerGradeAsync(
-        Guid id,
-        [FromQuery] string gradingRound = "Lần 1",
-        CancellationToken ct = default)
+        Guid id, [FromQuery] string? gradingRound, CancellationToken ct = default)
     {
         var count = await assignmentService.TriggerGradeAsync(id, gradingRound, ct);
-        return Ok(count, $"Enqueued {count} grading job(s) for round '{gradingRound}'.");
+        return Ok(count, $"Enqueued {count} grading job(s).");
     }
 }

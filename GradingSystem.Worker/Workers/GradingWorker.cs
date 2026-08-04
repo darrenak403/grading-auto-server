@@ -59,8 +59,9 @@ public class GradingWorker(
 
         if (exportJob == null) return;
 
-        logger.LogInformation("Processing export job {JobId} for assignment {AssignmentId}",
-            exportJob.Id, exportJob.AssignmentId);
+        logger.LogInformation(
+            "Processing export job {JobId} (assignment={AssignmentId}, session={ExamSessionId}, lab={LabAssignmentId})",
+            exportJob.Id, exportJob.AssignmentId, exportJob.ExamSessionId, exportJob.LabAssignmentId);
 
         try
         {

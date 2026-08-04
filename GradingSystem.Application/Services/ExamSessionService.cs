@@ -85,12 +85,19 @@ public partial class ExamSessionService(IUnitOfWork unitOfWork, IPublishEndpoint
         return MapSummary(entity);
     }
 
-    public async Task<IReadOnlyList<ParticipantDto>> GetParticipantsAsync(Guid sessionId, CancellationToken ct = default)
+    public async Task<IReadOnlyList<ParticipantDto>> GetParticipantsAsync(
+        Guid sessionId, Guid? assignmentId = null, CancellationToken ct = default)
     {
         _ = await unitOfWork.ExamSessions.GetByIdAsync(sessionId)
             ?? throw new NotFoundException($"ExamSession '{sessionId}' not found.");
 
-        var participants = await unitOfWork.Participants.FindAsync(p => p.ExamSessionId == sessionId);
+        if (assignmentId.HasValue)
+            await EnsureAssignmentInSessionAsync(sessionId, assignmentId.Value);
+
+        var allParticipants = await unitOfWork.Participants.FindAsync(p => p.ExamSessionId == sessionId);
+        var participants = assignmentId.HasValue
+            ? allParticipants.Where(p => p.AssignmentId == assignmentId.Value).ToList()
+            : allParticipants.ToList();
         var assignmentIds = participants.Select(p => p.AssignmentId).Distinct().ToList();
         var assignmentTitles = new Dictionary<Guid, string>();
         var assignmentCodes = new Dictionary<Guid, string>();
@@ -117,13 +124,127 @@ public partial class ExamSessionService(IUnitOfWork unitOfWork, IPublishEndpoint
         }).ToList();
     }
 
-    public async Task<IReadOnlyList<SessionSubmissionResultDto>> GetSessionResultsAsync(
-        Guid sessionId, string? gradingRound, CancellationToken ct = default)
+    public async Task<ImportSessionParticipantsResultDto> ImportParticipantsByCodeAsync(
+        Guid sessionId, Stream csvStream, CancellationToken ct = default)
     {
         _ = await unitOfWork.ExamSessions.GetByIdAsync(sessionId)
             ?? throw new NotFoundException($"ExamSession '{sessionId}' not found.");
 
         var assignments = (await unitOfWork.Assignments.FindAsync(a => a.ExamSessionId == sessionId)).ToList();
+        var result = new ImportSessionParticipantsResultDto();
+        using var reader = new StreamReader(csvStream);
+
+        string? line;
+        int lineNumber = 0;
+        while ((line = await reader.ReadLineAsync(ct)) != null)
+        {
+            lineNumber++;
+            if (string.IsNullOrWhiteSpace(line)) continue;
+
+            if (lineNumber == 1 && CsvImportHelper.IsHeaderRow(line))
+                continue;
+
+            var parts = CsvImportHelper.SplitColumns(line);
+            if (parts.Length < 3)
+            {
+                result.Errors.Add(new ImportSessionParticipantsErrorDto
+                {
+                    Line = lineNumber,
+                    Raw = line,
+                    Reason = "expected 'username,studentCode,assignmentCode'.",
+                });
+                continue;
+            }
+
+            var username       = parts[0].ToLowerInvariant();
+            var studentCode    = parts[1];
+            var assignmentCode = parts[2];
+
+            var assignment = assignments.FirstOrDefault(a =>
+                string.Equals(a.Code, assignmentCode, StringComparison.OrdinalIgnoreCase));
+
+            if (assignment is null)
+            {
+                result.Skipped++;
+                result.Errors.Add(new ImportSessionParticipantsErrorDto
+                {
+                    Line = lineNumber,
+                    Raw = line,
+                    Reason = $"no assignment with code '{assignmentCode}' in this session.",
+                });
+                continue;
+            }
+
+            var existing = (await unitOfWork.Participants.FindAsync(
+                p => p.ExamSessionId == sessionId && p.Username == username)).FirstOrDefault();
+
+            if (existing is not null)
+            {
+                existing.StudentCode  = studentCode;
+                existing.AssignmentId = assignment.Id;
+                unitOfWork.Participants.Update(existing);
+                result.Updated++;
+            }
+            else
+            {
+                await unitOfWork.Participants.AddAsync(new Participant
+                {
+                    ExamSessionId = sessionId,
+                    Username      = username,
+                    StudentCode   = studentCode,
+                    AssignmentId  = assignment.Id,
+                });
+                result.Created++;
+            }
+        }
+
+        if (result.Created > 0 || result.Updated > 0)
+            await unitOfWork.SaveChangesAsync(ct);
+
+        return result;
+    }
+
+    public async Task<IReadOnlyList<string>> GetRoundsAsync(
+        Guid sessionId, Guid? assignmentId = null, CancellationToken ct = default)
+    {
+        _ = await unitOfWork.ExamSessions.GetByIdAsync(sessionId)
+            ?? throw new NotFoundException($"ExamSession '{sessionId}' not found.");
+
+        HashSet<Guid> assignmentIds;
+        if (assignmentId.HasValue)
+        {
+            await EnsureAssignmentInSessionAsync(sessionId, assignmentId.Value);
+            assignmentIds = new HashSet<Guid> { assignmentId.Value };
+        }
+        else
+        {
+            assignmentIds = (await unitOfWork.Assignments.FindAsync(a => a.ExamSessionId == sessionId))
+                .Select(a => a.Id).ToHashSet();
+        }
+
+        var submissions = await unitOfWork.Submissions.FindAsync(s => assignmentIds.Contains(s.AssignmentId));
+
+        return submissions
+            .GroupBy(s => s.GradingRound)
+            .Select(g => new { Round = g.Key, FirstSeen = g.Min(s => s.CreatedAt) })
+            .OrderBy(x => x.FirstSeen)
+            .Select(x => x.Round)
+            .ToList();
+    }
+
+    public async Task<IReadOnlyList<SessionSubmissionResultDto>> GetSessionResultsAsync(
+        Guid sessionId, string? gradingRound, Guid? assignmentId = null, CancellationToken ct = default)
+    {
+        _ = await unitOfWork.ExamSessions.GetByIdAsync(sessionId)
+            ?? throw new NotFoundException($"ExamSession '{sessionId}' not found.");
+
+        if (assignmentId.HasValue)
+            await EnsureAssignmentInSessionAsync(sessionId, assignmentId.Value);
+
+        var allAssignments = (await unitOfWork.Assignments.FindAsync(a => a.ExamSessionId == sessionId)).ToList();
+        var assignments = assignmentId.HasValue
+            ? allAssignments.Where(a => a.Id == assignmentId.Value).ToList()
+            : allAssignments;
         var assignmentIds = assignments.Select(a => a.Id).ToHashSet();
         var assignmentCodeMap = assignments.ToDictionary(a => a.Id, a => a.Code);
 
@@ -132,6 +253,11 @@ public partial class ExamSessionService(IUnitOfWork unitOfWork, IPublishEndpoint
         var usernameByStudentCode = participants.ToDictionary(p => p.StudentCode, p => p.Username, StringComparer.OrdinalIgnoreCase);
 
         var submissionsQuery = await unitOfWork.Submissions.FindAsync(s => assignmentIds.Contains(s.AssignmentId));
+        var allRoundsInScope = submissionsQuery.Select(s => s.GradingRound).ToHashSet();
+        if (gradingRound is null && allRoundsInScope.Count > 1)
+            throw new BadRequestException(
+                "This exam session has assignments with multiple grading rounds; specify gradingRound to view results.");
+
         var submissions = (gradingRound != null
             ? submissionsQuery.Where(s => s.GradingRound == gradingRound)
             : submissionsQuery).ToList();
@@ -206,6 +332,13 @@ public partial class ExamSessionService(IUnitOfWork unitOfWork, IPublishEndpoint
         }
 
         return dtos;
+    }
+
+    private async Task EnsureAssignmentInSessionAsync(Guid sessionId, Guid assignmentId)
+    {
+        var assignment = await unitOfWork.Assignments.GetByIdAsync(assignmentId);
+        if (assignment is null || assignment.ExamSessionId != sessionId)
+            throw new NotFoundException($"Assignment '{assignmentId}' not found in exam session '{sessionId}'.");
     }
 
     private static readonly JsonSerializerOptions _jsonOpts = new(JsonSerializerDefaults.Web);
