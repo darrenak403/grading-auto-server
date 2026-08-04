@@ -119,6 +119,28 @@ Gom nhiều Assignment, xem kết quả tổng hợp, export multi-sheet.
 
 PE (Practical Exam) chấm theo **Assignment → Question → TestCase**, có thể gom nhiều Assignment vào một **ExamSession**. Chấm nhiều round, mỗi round độc lập. Một Assignment thường có 2 Question: **Q1** (`QuestionType.Api`) và **Q2** (`QuestionType.Razor`), mỗi câu chấm bằng cơ chế khác nhau.
 
+### Lệnh chạy hạ tầng (bắt buộc trước khi chấm PE)
+
+```bash
+cp docker/.env.example docker/.env.local     # lần đầu
+# Trong docker/.env.local: bỏ comment Playwright__BrowserCdpEndpoint=http://127.0.0.1:9222 (bắt buộc nếu có Q2)
+
+task up                                       # Postgres + SQL Server + RabbitMQ + pgWeb
+task playwright:up                            # Chromium CDP — CHỈ cần khi assignment có câu Q2 (Razor)
+task migrate                                  # lần đầu / sau khi đổi schema
+
+task run                                      # = playwright:up + build + chạy API (:5049) và Worker cùng lúc
+# hoặc chạy tách 2 terminal để dễ xem log riêng:
+task api                                      # terminal 1 — http://localhost:5049/swagger
+task worker                                   # terminal 2 — cần Q1 nhớ có SQL Server đang chạy (đã có từ `task up`)
+```
+
+Sau khi hạ tầng + API + Worker đã chạy, thực hiện các bước gọi API bên dưới bằng Swagger, hoặc chạy trực tiếp file mẫu [`grading-system.http`](grading-system.http) (VS Code REST Client / Rider HTTP Client) — đã soạn sẵn đủ các bước từ tạo ExamSession đến export.
+
+```bash
+task playwright:down                          # sau khi chấm xong Q2, tắt CDP để nhẹ máy
+```
+
 | | Q1 (`Api`) | Q2 (`Razor`) |
 |---|---|---|
 | Đề bài | ASP.NET Web API + Stored Procedures | ASP.NET Razor Pages, gọi tới **Given API** |
@@ -173,6 +195,27 @@ PE (Practical Exam) chấm theo **Assignment → Question → TestCase**, có th
 ## Quy trình chấm Lab
 
 Lab chấm theo **LabAssignment → LabTestCase**, không có Question — mỗi lab là một bài chấm độc lập, hỗ trợ chấm bằng Docker Compose của sinh viên.
+
+### Lệnh chạy hạ tầng (bắt buộc trước khi chấm Lab)
+
+```bash
+cp docker/.env.example docker/.env.local     # lần đầu (không cần bật Playwright — Lab không dùng)
+
+task up                                       # Postgres + RabbitMQ + pgWeb (Lab không cần SQL Server)
+task migrate                                  # lần đầu / sau khi đổi schema
+
+# Pre-pull base image Docker mà đề bài yêu cầu — tránh lỗi BuildFailed do mạng khi Worker tự docker compose up
+docker pull mcr.microsoft.com/dotnet/aspnet:8.0
+docker pull mcr.microsoft.com/dotnet/sdk:8.0
+# (pull thêm image nào compose sinh viên hay dùng, vd. postgres, sqlserver...)
+
+task api                                      # terminal 1 — http://localhost:5049/swagger
+task worker                                   # terminal 2 — LabGradingWorker cần quyền chạy `docker compose`
+```
+
+Đảm bảo máy chạy Worker có **Docker Engine** hoạt động và tài khoản chạy `task worker` có quyền gọi `docker compose` (Lab dùng compose file của sinh viên, host port cấp trong dải 15000–16000).
+
+Thực hiện các bước gọi API bên dưới qua Swagger. Test case mẫu (JSON array để import batch) tham khảo tại `docs/lab-md/*.testcases.json`.
 
 ### 1. Chuẩn bị đề
 
