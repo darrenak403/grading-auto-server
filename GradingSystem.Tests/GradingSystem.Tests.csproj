@@ -16,6 +16,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\GradingSystem.Api\GradingSystem.Api.csproj" />
     <ProjectReference Include="..\GradingSystem.Application\GradingSystem.Application.csproj" />
     <ProjectReference Include="..\GradingSystem.Worker\GradingSystem.Worker.csproj" />
   </ItemGroup>

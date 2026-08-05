@@ -108,7 +108,9 @@ public class AssignmentsController(IAssignmentService assignmentService, IBulkUp
     public async Task<IActionResult> BulkUploadAsync(Guid id, IFormFile file, CancellationToken ct = default)
     {
         if (file is null || file.Length == 0)
-            return BadRequest("Master zip file is required.");
+            return BadRequest("ZIP file is required.");
+        if (!Path.GetExtension(file.FileName).Equals(".zip", StringComparison.OrdinalIgnoreCase))
+            return BadRequest("File must have a .zip extension.");
 
         await using var stream = file.OpenReadStream();
         var result = await bulkUploadService.ParseAndCreateForLatestRoundAsync(id, stream, ct);
@@ -122,7 +124,9 @@ public class AssignmentsController(IAssignmentService assignmentService, IBulkUp
     public async Task<IActionResult> CreateRoundAsync(Guid id, IFormFile file, CancellationToken ct)
     {
         if (file is null || file.Length == 0)
-            return BadRequest("Master zip file is required.");
+            return BadRequest("ZIP file is required.");
+        if (!Path.GetExtension(file.FileName).Equals(".zip", StringComparison.OrdinalIgnoreCase))
+            return BadRequest("File must have a .zip extension.");
 
         await using var stream = file.OpenReadStream();
         var result = await bulkUploadService.CreateNewRoundAsync(id, stream, ct);

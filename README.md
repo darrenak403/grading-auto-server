@@ -103,7 +103,7 @@ Giảng viên tạo Assignment → upload `database.sql` (dùng cho Q1) và/ho�
 
 ### Nộp bài & chấm
 
-Import CSV sinh viên → upload `master.zip` (thêm vào round hiện tại) hoặc tạo round mới → **Grade** → API publish message → Worker: extract artifact, chạy test, lưu `QuestionResult`, cleanup. Mỗi round được đánh số tự động ("Lần 1", "Lần 2", ...) và độc lập với nhau.
+Import CSV sinh viên → upload một file `.zip` bất kỳ tên (thêm vào round hiện tại) hoặc tạo round mới → **Grade** → API publish message → Worker: extract artifact, chạy test, lưu `QuestionResult`, cleanup. Mỗi round được đánh số tự động ("Lần 1", "Lần 2", ...) và độc lập với nhau.
 
 ### Kết quả & export
 
@@ -162,7 +162,7 @@ task playwright:down                          # sau khi chấm xong Q2, tắt CD
 
 5. `POST /assignments/{id}/participants/import` — import danh sách thí sinh (CSV: mã SV).
 6. Nộp bài — chọn một trong hai:
-   - `POST /assignments/{id}/bulk-upload` — upload `master.zip` (mỗi sinh viên là 1 thư mục con ở gốc zip hoặc bên trong 1 thư mục wrapper, mỗi thư mục sinh viên chứa thư mục con theo `ArtifactFolderName` của từng câu hỏi, vd. `1/`, `2/`), thêm submission vào round **hiện tại**.
+   - `POST /assignments/{id}/bulk-upload` — upload file `.zip` bất kỳ tên (mỗi sinh viên là 1 thư mục con ở gốc zip hoặc bên trong 1 thư mục wrapper, mỗi thư mục sinh viên chứa thư mục con theo `ArtifactFolderName` của từng câu hỏi, vd. `1/`, `2/`), thêm submission vào round **hiện tại**.
    - `POST /assignments/{id}/rounds` — tạo round mới (tự động đánh số "Lần 1", "Lần 2", ...) rồi upload vào round đó.
 
 ### 3. Chấm bài

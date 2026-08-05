@@ -29,7 +29,10 @@ public partial class ExportRunner(
                 "ExportJob has no AssignmentId, ExamSessionId, or LabAssignmentId.");
 
         if (markInputAssignments.Count > 0)
+        {
             await BuildMarkInputSheetAsync(pkg, markInputAssignments, job.GradingRound, uow, ct);
+            await BuildErrorSubmissionsSheetAsync(pkg, markInputAssignments, job.GradingRound, uow, ct);
+        }
 
         var dir = Path.GetFullPath(Path.Combine(config["Storage:BasePath"]!, "exports"));
         Directory.CreateDirectory(dir);
@@ -168,13 +171,7 @@ public partial class ExportRunner(
                 row.Add($"{qResult.FinalScore}/{qResult.MaxScore}");
                 row.Add(qResult.AdjustReason ?? string.Empty);
 
-                // Basic Vietnamese per-question note: name which test cases inside this question
-                // came up short, so the grader can see why without opening the JSON detail.
-                var failedTestCaseNames = tcs
-                    .Where((tc, ti) => (details.ElementAtOrDefault(ti)?.AwardedScore ?? 0) < tc.Score)
-                    .Select(tc => tc.Name)
-                    .ToList();
-                row.Add(failedTestCaseNames.Count > 0 ? $"Sai: {string.Join(", ", failedTestCaseNames)}" : string.Empty);
+                row.Add(BuildQuestionFailureNote(tcs, details));
 
                 grandTotal += qResult.FinalScore;
                 grandMax += qResult.MaxScore;
@@ -277,6 +274,74 @@ public partial class ExportRunner(
 
     private sealed record MarkInputRow(
         string Solution, string Paper, IReadOnlyList<decimal> QuestionScores, string Comment);
+
+    private static string BuildQuestionFailureNote(
+        IReadOnlyList<TestCase> testCases, IReadOnlyList<TestCaseResult> details)
+    {
+        var failures = testCases
+            .Select((testCase, index) => (testCase, result: details.ElementAtOrDefault(index)))
+            .Where(item => (item.result?.AwardedScore ?? 0) < item.testCase.Score)
+            .Select(item =>
+            {
+                var method = string.IsNullOrWhiteSpace(item.result?.HttpMethod)
+                    ? item.testCase.HttpMethod
+                    : item.result.HttpMethod;
+                var statusCode = item.result?.ActualStatus ?? 0;
+                return $"{item.testCase.Name} — {method} {item.testCase.UrlTemplate} — HTTP {statusCode}";
+            })
+            .ToList();
+
+        return failures.Count == 0 ? string.Empty : $"Sai: {string.Join("; ", failures)}";
+    }
+
+    private async Task BuildErrorSubmissionsSheetAsync(
+        ExcelPackage pkg, IReadOnlyList<Assignment> assignments, string? gradingRound,
+        IUnitOfWork uow, CancellationToken ct)
+    {
+        var rows = new List<List<object>>();
+
+        foreach (var assignment in assignments.OrderBy(a => a.Code))
+        {
+            var submissionsQuery = await uow.Submissions.FindAsync(s => s.AssignmentId == assignment.Id);
+            var submissions = (gradingRound is null
+                    ? submissionsQuery
+                    : submissionsQuery.Where(s => s.GradingRound == gradingRound))
+                .ToList();
+            var submissionIds = submissions.Select(s => s.Id).ToHashSet();
+
+            var latestAttemptBySubmission = (await uow.GradingJobs.FindAsync(j =>
+                    submissionIds.Contains(j.SubmissionId)
+                    && (gradingRound == null || j.GradingRound == gradingRound)
+                    && (j.Status == JobStatus.Done || j.Status == JobStatus.Failed)))
+                .GroupBy(j => j.SubmissionId)
+                .ToDictionary(
+                    g => g.Key,
+                    g => g.OrderByDescending(j => j.CreatedAt).ThenByDescending(j => j.Id).First());
+
+            foreach (var submission in submissions
+                         .Where(s => latestAttemptBySubmission.TryGetValue(s.Id, out var latest)
+                             && latest.Status == JobStatus.Failed)
+                         .OrderBy(s => s.StudentCode))
+            {
+                var failedJob = latestAttemptBySubmission[submission.Id];
+                rows.Add([
+                    submission.StudentCode,
+                    assignment.Code,
+                    submission.GradingRound,
+                    NormalizeExcelText(failedJob.ErrorMessage
+                        ?? "Lỗi hệ thống khi chấm bài, cần chấm lại."),
+                ]);
+            }
+        }
+
+        var ws = WriteSheet(
+            pkg,
+            UniqueSheetName(pkg, "Error_Submissions"),
+            ["MSSV", "Mã đề", "Lần chấm", "Lý do lỗi"],
+            rows);
+        ws.Column(4).Width = 80;
+        ws.Column(4).Style.WrapText = true;
+    }
 
     // Basic Vietnamese auto-comment: if the latest grading attempt failed outright, surface why
     // (job.ErrorMessage is already a Vietnamese explanation — see GradingPipeline.TranslateJobError);
