@@ -9,7 +9,7 @@
     "elementId": "td_price_3",
     "elementText": "120000.00",
     "order": 1,
-    "score": 1.2
+    "score": 1
   },
   {
     "name": "TC02 - Hien thi form va bo loc tim kiem tren /Movie",
@@ -21,7 +21,7 @@
     "selector": "#sl_priceSegment",
     "selectorMinCount": 1,
     "order": 2,
-    "score": 0.6
+    "score": 0.5
   },
   {
     "name": "TC03 - Hien thi lien ket Analyze Movie tren /Movie",
@@ -33,7 +33,7 @@
     "selector": "a#a_1[href*='/Movie/Analyze/1']",
     "selectorMinCount": 1,
     "order": 3,
-    "score": 1.2
+    "score": 1
   },
   {
     "name": "TC04 - Trang phan tich /Movie/Analyze/1 hien thi thong tin phim",
@@ -47,7 +47,7 @@
     "selectorText": "Lat Mat 7",
     "value": "90000.00",
     "order": 4,
-    "score": 1.2
+    "score": 1
   },
   {
     "name": "TC05 - Trang phan tich /Movie/Analyze/1 hien thi combo kem theo",
@@ -61,7 +61,7 @@
     "selectorText": "Premium Item",
     "value": "Nuoc Ngot Lon",
     "order": 5,
-    "score": 1.2
+    "score": 1
   },
   {
     "name": "TC06 - Loc danh sach phim theo the loai Hanh dong (genreId=1)",
@@ -75,6 +75,6 @@
     "selectorMinCount": 1,
     "selectorText": "Biet Doi Anh Hung",
     "order": 6,
-    "score": 0.6
+    "score": 0.5
   }
 ]
