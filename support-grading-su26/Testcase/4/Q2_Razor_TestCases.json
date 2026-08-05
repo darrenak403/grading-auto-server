@@ -67,7 +67,7 @@
     "name": "TC06 - Loc danh sach phim theo the loai Hanh dong (genreId=1)",
     "httpMethod": "GET",
     "urlTemplate": "/Movie",
-    "input": { "genreId": 1 },
+    "input": {"genreId": 1},
     "expectedStatus": 200,
     "elementId": "td_title_1",
     "elementText": "Lat Mat 7",

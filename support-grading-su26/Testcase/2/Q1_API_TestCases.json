@@ -5,11 +5,11 @@
     "urlTemplate": "/api/Combos",
     "expectedStatus": 200,
     "expectedBody": [
-      { "comboId": 1, "comboName": "Bap Rang Bo Single", "price": 45000, "priceWithTax": 47250 },
-      { "comboId": 2, "comboName": "Nuoc Ngot Lon", "price": 30000, "priceWithTax": 31500 },
-      { "comboId": 3, "comboName": "Combo Doi Bap Nuoc", "price": 95000, "priceWithTax": 99750 },
-      { "comboId": 4, "comboName": "Kho Ga Xe Cay", "price": 35000, "priceWithTax": 36750 },
-      { "comboId": 5, "comboName": "Xuc Xich Nuong", "price": 25000, "priceWithTax": 26250 }
+      {"comboId": 1, "comboName": "Bap Rang Bo Single", "price": 45000, "priceWithTax": 47250},
+      {"comboId": 2, "comboName": "Nuoc Ngot Lon", "price": 30000, "priceWithTax": 31500},
+      {"comboId": 3, "comboName": "Combo Doi Bap Nuoc", "price": 95000, "priceWithTax": 99750},
+      {"comboId": 4, "comboName": "Kho Ga Xe Cay", "price": 35000, "priceWithTax": 36750},
+      {"comboId": 5, "comboName": "Xuc Xich Nuong", "price": 25000, "priceWithTax": 26250}
     ],
     "order": 1,
     "score": 1
@@ -18,7 +18,7 @@
     "name": "GET /api/filter-movies?genreId=1&maxDuration=150 - loc phim hop le",
     "httpMethod": "GET",
     "urlTemplate": "/api/filter-movies",
-    "input": { "genreId": 1, "maxDuration": 150 },
+    "input": {"genreId": 1, "maxDuration": 150},
     "expectedStatus": 200,
     "expectedBody": [
       {
@@ -47,7 +47,7 @@
     "name": "GET /api/filter-movies?genreId=1&maxDuration=29 - maxDuration duoi 30 phut -> 400",
     "httpMethod": "GET",
     "urlTemplate": "/api/filter-movies",
-    "input": { "genreId": 1, "maxDuration": 29 },
+    "input": {"genreId": 1, "maxDuration": 29},
     "expectedStatus": 400,
     "order": 3,
     "score": 0.25
@@ -56,9 +56,9 @@
     "name": "POST /api/Combos - tao combo moi hop le",
     "httpMethod": "POST",
     "urlTemplate": "/api/Combos",
-    "input": { "comboName": "New Combo", "price": 40000 },
+    "input": {"comboName": "New Combo", "price": 40000},
     "expectedStatus": 201,
-    "expectedBody": { "comboId": 6, "comboName": "New Combo", "price": 40000 },
+    "expectedBody": {"comboId": 6, "comboName": "New Combo", "price": 40000},
     "order": 4,
     "score": 0.75
   },
@@ -66,7 +66,7 @@
     "name": "POST /api/Combos - trung ten combo Xuc Xich Nuong -> 400",
     "httpMethod": "POST",
     "urlTemplate": "/api/Combos",
-    "input": { "comboName": "Xuc Xich Nuong", "price": 40000 },
+    "input": {"comboName": "Xuc Xich Nuong", "price": 40000},
     "expectedStatus": 400,
     "order": 5,
     "score": 0.5

@@ -98,7 +98,7 @@ public class GradingPipeline(
             if (job != null && submission != null)
             {
                 job.Status        = JobStatus.Failed;
-                job.ErrorMessage  = ex.Message;
+                job.ErrorMessage  = TranslateJobError(ex.Message);
                 submission.Status = SubmissionStatus.Error;
             }
 
@@ -145,6 +145,31 @@ public class GradingPipeline(
             await uow.SaveChangesAsync(CancellationToken.None);
         }
     }
+
+    // Maps the raw (usually English) exception message into a short Vietnamese explanation
+    // for graders, so job.ErrorMessage — shown as-is in the Submission Details UI — says why
+    // the run failed instead of surfacing a raw driver/runtime exception string.
+    private static string TranslateJobError(string rawMessage) => rawMessage switch
+    {
+        _ when rawMessage.Contains("did not start within", StringComparison.OrdinalIgnoreCase) =>
+            $"Ứng dụng của sinh viên không phản hồi kịp thời sau khi khởi động, có thể do lỗi runtime hoặc khởi động quá chậm. (Chi tiết: {rawMessage})",
+        _ when rawMessage.Contains("exited with code", StringComparison.OrdinalIgnoreCase) =>
+            $"Ứng dụng của sinh viên bị thoát/crash trước khi sẵn sàng nhận request, thường do lỗi biên dịch hoặc lỗi runtime khi khởi động. (Chi tiết: {rawMessage})",
+        _ when rawMessage.Contains("strict mode violation", StringComparison.OrdinalIgnoreCase) =>
+            $"Trang HTML của sinh viên có nhiều phần tử trùng id/selector nên không xác định được đúng phần tử cần kiểm tra. (Chi tiết: {rawMessage})",
+        _ when rawMessage.Contains("login failed", StringComparison.OrdinalIgnoreCase) =>
+            $"Lỗi đăng nhập cơ sở dữ liệu khi chấm bài, cần chấm lại. (Chi tiết: {rawMessage})",
+        _ when rawMessage.Contains("connection is broken", StringComparison.OrdinalIgnoreCase)
+            || rawMessage.Contains("recovery is not possible", StringComparison.OrdinalIgnoreCase) =>
+            $"Mất kết nối cơ sở dữ liệu trong lúc chấm, cần chấm lại. (Chi tiết: {rawMessage})",
+        _ when rawMessage.Contains("cannot open database", StringComparison.OrdinalIgnoreCase) =>
+            $"Không mở được cơ sở dữ liệu khi chấm, có thể do xung đột với bài chấm khác, cần chấm lại. (Chi tiết: {rawMessage})",
+        _ when rawMessage.Contains("no free port", StringComparison.OrdinalIgnoreCase) =>
+            $"Hệ thống chấm hết cổng (port) khả dụng lúc chấm, cần chấm lại. (Chi tiết: {rawMessage})",
+        _ when rawMessage.Contains("no suitable .csproj", StringComparison.OrdinalIgnoreCase) =>
+            $"Không tìm thấy project (.csproj) hoặc file build hợp lệ trong bài nộp của sinh viên. (Chi tiết: {rawMessage})",
+        _ => $"Lỗi hệ thống khi chấm bài. (Chi tiết: {rawMessage})",
+    };
 
     private void DeleteArtifact(Submission submission)
     {

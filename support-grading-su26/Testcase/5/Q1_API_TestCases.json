@@ -5,12 +5,42 @@
     "urlTemplate": "/api/Genres",
     "expectedStatus": 200,
     "expectedBody": [
-      { "genreId": 1, "genreName": "Hanh dong", "description": "Phim co nhieu canh duoi bat, danh nhau gay can", "movieCount": 2 },
-      { "genreId": 2, "genreName": "Kinh di", "description": "Phim co yeu to ma mi, giat gan, dang so", "movieCount": 1 },
-      { "genreId": 3, "genreName": "Hoat hinh", "description": "Phim danh cho thieu nhi va gia dinh", "movieCount": 1 },
-      { "genreId": 4, "genreName": "Hai huoc", "description": "Phim mang lai tieng cuoi va giai tri", "movieCount": 2 },
-      { "genreId": 5, "genreName": "Tinh cam", "description": "Phim tap trung vao cau chuyen tinh yeu", "movieCount": 1 },
-      { "genreId": 6, "genreName": "Khoa hoc", "description": "Phim nghien cuu khoa hoc, vien tuong", "movieCount": 0 }
+      {
+        "genreId": 1,
+        "genreName": "Hanh dong",
+        "description": "Phim co nhieu canh duoi bat, danh nhau gay can",
+        "movieCount": 2
+      },
+      {
+        "genreId": 2,
+        "genreName": "Kinh di",
+        "description": "Phim co yeu to ma mi, giat gan, dang so",
+        "movieCount": 1
+      },
+      {
+        "genreId": 3,
+        "genreName": "Hoat hinh",
+        "description": "Phim danh cho thieu nhi va gia dinh",
+        "movieCount": 1
+      },
+      {
+        "genreId": 4,
+        "genreName": "Hai huoc",
+        "description": "Phim mang lai tieng cuoi va giai tri",
+        "movieCount": 2
+      },
+      {
+        "genreId": 5,
+        "genreName": "Tinh cam",
+        "description": "Phim tap trung vao cau chuyen tinh yeu",
+        "movieCount": 1
+      },
+      {
+        "genreId": 6,
+        "genreName": "Khoa hoc",
+        "description": "Phim nghien cuu khoa hoc, vien tuong",
+        "movieCount": 0
+      }
     ],
     "order": 1,
     "score": 1
@@ -19,7 +49,7 @@
     "name": "GET /api/filter-movies?genreId=1&minDuration=150 - loc phim hop le",
     "httpMethod": "GET",
     "urlTemplate": "/api/filter-movies",
-    "input": { "genreId": 1, "minDuration": 150 },
+    "input": {"genreId": 1, "minDuration": 150},
     "expectedStatus": 200,
     "expectedBody": [
       {
@@ -39,7 +69,7 @@
     "name": "GET /api/filter-movies?genreId=1&minDuration=-150 - minDuration am -> 400",
     "httpMethod": "GET",
     "urlTemplate": "/api/filter-movies",
-    "input": { "genreId": 1, "minDuration": -150 },
+    "input": {"genreId": 1, "minDuration": -150},
     "expectedStatus": 400,
     "order": 3,
     "score": 0.25
@@ -48,7 +78,7 @@
     "name": "POST /api/movies - them phim moi hop le",
     "httpMethod": "POST",
     "urlTemplate": "/api/movies",
-    "input": { "title": "Phim Moi", "duration": 20, "basePrice": 20000.00 },
+    "input": {"title": "Phim Moi", "duration": 20, "basePrice": 20000.0},
     "expectedStatus": 201,
     "expectedBody": {
       "movieId": 7,
@@ -65,7 +95,7 @@
     "name": "POST /api/movies - trung ten phim Lat Mat 7 -> 400",
     "httpMethod": "POST",
     "urlTemplate": "/api/movies",
-    "input": { "title": "Lat Mat 7", "duration": 20, "basePrice": 20000.00 },
+    "input": {"title": "Lat Mat 7", "duration": 20, "basePrice": 20000.0},
     "expectedStatus": 400,
     "order": 5,
     "score": 0.5
