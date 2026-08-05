@@ -219,12 +219,18 @@ public partial class ArtifactRunner(
     private async Task SetupDatabaseAsync(string dbName, string sqlScriptPath, CancellationToken ct)
     {
         RequireValidDatabaseName(dbName);
+
+        // Force out any stale/pooled connections left over from a previous job that used this
+        // same database name (e.g. two students hardcoding the same local DB name) before
+        // (re)creating it — a plain DROP here would fail with "database is currently in use"
+        // the same way an un-forced drop does in DropDatabaseAsync.
+        await DropDatabaseAsync(dbName);
+
         var masterConn = config.GetConnectionString("SqlServer")!;
 
         await using (var conn = new SqlConnection(masterConn))
         {
             await conn.OpenAsync(ct);
-            await ExecuteNonQueryAsync(conn, $"IF DB_ID(N'{dbName}') IS NOT NULL DROP DATABASE [{dbName}]");
             await ExecuteNonQueryAsync(conn, $"CREATE DATABASE [{dbName}]");
         }
 
