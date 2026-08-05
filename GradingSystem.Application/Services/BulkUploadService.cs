@@ -41,8 +41,11 @@ public class BulkUploadService(
             using var archive = new ZipArchive(masterZipStream, ZipArchiveMode.Read, leaveOpen: true);
             ExtractArchiveToDirectory(archive, tempRoot);
 
-            // Top-level directories = student folders (e.g. "hoalvpse181951")
-            var studentDirs = Directory.GetDirectories(tempRoot);
+            // Top-level directories = student folders (e.g. "hoalvpse181951").
+            // Some exports wrap all student folders in one extra directory (e.g. the exam
+            // paper code "5/"), so descend through non-matching wrapper levels until we
+            // reach the level whose folder names actually match participants.
+            var studentDirs = FindStudentDirs(tempRoot, participantByUsername);
             result.Parsed = studentDirs.Length;
 
             var seenUsernames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -261,6 +264,30 @@ public class BulkUploadService(
                 FailReason    = message,
             }
         });
+
+    /// Descends through wrapper directories (e.g. an exam-code folder wrapping every
+    /// student folder) until it finds the level whose directory names match participant
+    /// usernames. Falls back to the immediate top-level directories if no level matches
+    /// (preserves the original "no matching participant found" error reporting).
+    private static string[] FindStudentDirs(
+        string tempRoot, IReadOnlyDictionary<string, Participant> participantByUsername)
+    {
+        const int maxDepth = 5;
+        var topLevelDirs = Directory.GetDirectories(tempRoot);
+        var currentLevel = topLevelDirs;
+
+        for (var depth = 0; depth < maxDepth; depth++)
+        {
+            if (currentLevel.Length == 0) break;
+
+            var matchCount = currentLevel.Count(d => participantByUsername.ContainsKey(Path.GetFileName(d)));
+            if (matchCount > 0) return currentLevel;
+
+            currentLevel = currentLevel.SelectMany(Directory.GetDirectories).ToArray();
+        }
+
+        return topLevelDirs;
+    }
 
     private static string? FindQuestionFolder(string studentDir, string artifactFolderName)
     {
