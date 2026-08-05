@@ -1,8 +1,12 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO.Compression;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using GradingSystem.Domain.Entities;
 using GradingSystem.Worker.Options;
 using Microsoft.Data.SqlClient;
@@ -77,6 +81,7 @@ public partial class ArtifactRunner(
             StripPublishingListenConfigFromAppSettings(givenRoot);
 
             var givenTarget = FindExecutableTarget(givenRoot);
+            RepairMissingRuntimeAssets(givenTarget);
             var givenPort = PickPort();
             var givenProcess = StartDotnet(givenTarget, givenPort);
 
@@ -98,9 +103,20 @@ public partial class ArtifactRunner(
             var questionDir = Path.Combine(studentRoot, question.ArtifactFolderName);
             if (!Directory.Exists(questionDir))
             {
-                logger.LogWarning("Folder '{Folder}' not found in artifact — searching root",
-                    question.ArtifactFolderName);
-                questionDir = studentRoot;
+                // Do NOT fall back to studentRoot: every artifact.zip nests each question strictly
+                // under its own ArtifactFolderName, so a missing folder means this question truly
+                // wasn't submitted (or ArtifactFolderName is misconfigured) — searching the shared
+                // root here would risk picking up and grading a sibling question's app instead.
+                var reason = $"Question folder '{question.ArtifactFolderName}' not found in submission — treated as not submitted.";
+                logger.LogWarning("Student folder missing for question {QId}: {Reason}", question.Id, reason);
+                ctx.QuestionApps[question.Id] = new QuestionApp
+                {
+                    Process = null!,
+                    Port = 0,
+                    NotSubmitted = true,
+                    NotSubmittedReason = reason,
+                };
+                continue;
             }
 
             // Q2: validate student used the correct GivenApiBaseUrl in their appsettings
@@ -122,7 +138,19 @@ public partial class ArtifactRunner(
                 }
             }
 
+            // Some students hardcode a local SQL connection string in OnConfiguring without an
+            // IsConfigured guard, which silently overrides whatever DI/env config we inject —
+            // the app then tries to reach a server/database that only exists on the student's own
+            // machine and 500s on every DB-touching request. Rather than fail those questions
+            // outright, detect the hardcoded string and provision a matching "shadow" database so
+            // the app's own (broken) configuration happens to reach real, seeded data.
+            if (question.Type == QuestionType.Api && ctx.DatabaseName != null && assignment.DatabaseSqlPath != null)
+            {
+                await ProvisionHardcodedShadowDatabaseAsync(question, questionDir, assignment.DatabaseSqlPath, ctx, ct);
+            }
+
             var target = FindExecutableTarget(questionDir);
+            RepairMissingRuntimeAssets(target);
             var port = PickPort();
             var env = BuildEnv(question, ctx.DatabaseName, effectiveGivenApiBaseUrl, questionDir);
 
@@ -144,7 +172,7 @@ public partial class ArtifactRunner(
     {
         foreach (var (qId, app) in ctx.QuestionApps)
         {
-            if (app.GivenUrlInvalid) continue;
+            if (app.GivenUrlInvalid || app.NotSubmitted) continue;
             try
             {
                 if (!app.Process.HasExited)
@@ -179,10 +207,18 @@ public partial class ArtifactRunner(
             try { await DropDatabaseAsync(ctx.DatabaseName); }
             catch (Exception ex) { logger.LogWarning(ex, "Failed to drop database {Db}", ctx.DatabaseName); }
         }
+
+        if (ctx.HardcodedShadowDb is { } shadowDb)
+        {
+            try { await DropDatabaseAsync(shadowDb.Name); }
+            catch (Exception ex) { logger.LogWarning(ex, "Failed to drop shadow database {Db}", shadowDb.Name); }
+            finally { shadowDb.Lock.Release(); }
+        }
     }
 
     private async Task SetupDatabaseAsync(string dbName, string sqlScriptPath, CancellationToken ct)
     {
+        RequireValidDatabaseName(dbName);
         var masterConn = config.GetConnectionString("SqlServer")!;
 
         await using (var conn = new SqlConnection(masterConn))
@@ -209,6 +245,7 @@ public partial class ArtifactRunner(
 
     private async Task DropDatabaseAsync(string dbName)
     {
+        RequireValidDatabaseName(dbName);
         var masterConn = config.GetConnectionString("SqlServer")!;
         await using var conn = new SqlConnection(masterConn);
         await conn.OpenAsync();
@@ -219,12 +256,28 @@ public partial class ArtifactRunner(
             $"DROP DATABASE [{dbName}] END");
     }
 
+    // Every dbName here either comes from our own "grading_{jobId:N}" format or is a catalog
+    // name pulled out of a student's own connection-string literal (ProvisionHardcodedShadowDatabaseAsync)
+    // before being interpolated straight into T-SQL DDL — reject anything that isn't a plain SQL
+    // identifier so a crafted "malicious'; DROP DATABASE x; --"-style literal can't reach the server.
+    [GeneratedRegex(@"^[A-Za-z0-9_]{1,64}$")]
+    private static partial Regex ValidDatabaseNameRegex();
+
+    private static void RequireValidDatabaseName(string dbName)
+    {
+        if (!ValidDatabaseNameRegex().IsMatch(dbName))
+            throw new InvalidOperationException($"Refusing to use unsafe database name: '{dbName}'");
+    }
+
     private static async Task ExecuteNonQueryAsync(SqlConnection conn, string sql)
     {
         await using var cmd = new SqlCommand(sql, conn);
         cmd.CommandTimeout = 30;
         await cmd.ExecuteNonQueryAsync();
     }
+
+    private SqlConnectionStringBuilder GetMasterConnectionStringBuilder() =>
+        new(config.GetConnectionString("SqlServer")!);
 
     private Dictionary<string, string> BuildEnv(
         Question question, string? dbName, string? givenApiBaseUrl, string? questionDir = null)
@@ -233,8 +286,8 @@ public partial class ArtifactRunner(
 
         if (question.Type == QuestionType.Api && dbName != null)
         {
-            var masterConn = config.GetConnectionString("SqlServer")!;
-            var builder = new SqlConnectionStringBuilder(masterConn) { InitialCatalog = dbName };
+            var builder = GetMasterConnectionStringBuilder();
+            builder.InitialCatalog = dbName;
             var connStr = builder.ConnectionString;
 
             // Always set DefaultConnection as the baseline
@@ -260,6 +313,114 @@ public partial class ArtifactRunner(
             env["GivenAPIBaseUrl"] = givenApiBaseUrl;
 
         return env;
+    }
+
+    // Cross-job registry of locks, one per distinct "server|database" a hardcoded connection
+    // string points at. Static/process-wide because different grading jobs (different students,
+    // possibly different assignments) can independently hardcode the exact same well-known
+    // server+database name (e.g. copied from the same in-class demo), and must not run
+    // concurrently against the shared shadow database that name maps to.
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> _hardcodedDbLocks = new(StringComparer.OrdinalIgnoreCase);
+
+    private static SemaphoreSlim GetHardcodedDbLock(string canonicalKey) =>
+        _hardcodedDbLocks.GetOrAdd(canonicalKey, _ => new SemaphoreSlim(1, 1));
+
+    private async Task ProvisionHardcodedShadowDatabaseAsync(
+        Question question, string questionDir, string databaseSqlPath, StudentContext ctx, CancellationToken ct)
+    {
+        var hardcoded = DetectHardcodedSqlConnectionString(questionDir);
+        if (hardcoded == null) return;
+
+        var canonicalKey = $"{hardcoded.DataSource}|{hardcoded.InitialCatalog}".ToLowerInvariant();
+        var sem = GetHardcodedDbLock(canonicalKey);
+        await sem.WaitAsync(ct);
+        try
+        {
+            await SetupDatabaseAsync(hardcoded.InitialCatalog, databaseSqlPath, ct);
+            ctx.HardcodedShadowDb = (hardcoded.InitialCatalog, sem);
+            logger.LogWarning(
+                "Question {QId}: student code hardcodes a local SQL connection string (ignoring " +
+                "injected config) — provisioned shadow database '{Db}' matching it so grading can proceed.",
+                question.Id, hardcoded.InitialCatalog);
+        }
+        catch
+        {
+            sem.Release();
+            throw;
+        }
+    }
+
+    [GeneratedRegex(
+        @"(?:Server|Data Source)\s*=\s*[^;""']+;\s*(?:(?:Database|Initial Catalog|UID|User Id|PWD|Password|TrustServerCertificate|Encrypt|MultipleActiveResultSets|Integrated Security)\s*=\s*[^;""']+;?\s*)+",
+        RegexOptions.IgnoreCase)]
+    private static partial Regex HardcodedConnStringRegex();
+
+    /// <summary>
+    /// Scans the student's Q1 artifact (source .cs and/or published .dll) for an embedded SQL
+    /// connection string literal pointing at a "local" server — the telltale sign of a scaffolded
+    /// OnConfiguring override that hardcodes its own DB instead of reading DI config. .NET string
+    /// literals survive compilation as plain UTF-16 text in the assembly, so scanning .dll bytes
+    /// decoded as Unicode finds them even when only a published build was submitted (no source).
+    /// </summary>
+    // Third-party framework/NuGet assemblies that ship alongside a published app can never
+    // contain the student's own OnConfiguring literal — skipping them by filename prefix avoids
+    // reading and regex-scanning dozens of unrelated multi-MB DLLs per question.
+    private static readonly string[] FrameworkDllPrefixes =
+        ["Microsoft.", "System.", "netstandard", "Newtonsoft.", "Swashbuckle.", "Azure."];
+
+    private SqlConnectionStringBuilder? DetectHardcodedSqlConnectionString(string questionDir)
+    {
+        foreach (var path in Directory.GetFiles(questionDir, "*", SearchOption.AllDirectories))
+        {
+            bool isCs = path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase);
+            bool isDll = !isCs && path.EndsWith(".dll", StringComparison.OrdinalIgnoreCase);
+            if (!isCs && !isDll) continue;
+
+            var fileName = Path.GetFileName(path);
+            if (isDll && FrameworkDllPrefixes.Any(p => fileName.StartsWith(p, StringComparison.OrdinalIgnoreCase)))
+                continue;
+
+            long length;
+            try { length = new FileInfo(path).Length; } catch { continue; }
+            if (length > 20_000_000) continue;
+
+            byte[] bytes;
+            try { bytes = File.ReadAllBytes(path); } catch { continue; }
+
+            // .cs source is UTF-8 text; compiled string literals in a .dll survive as UTF-16LE
+            // in the metadata blob — decoding the other encoding for a given file type is wasted
+            // work that can essentially never match.
+            var text = isCs ? Encoding.UTF8.GetString(bytes) : Encoding.Unicode.GetString(bytes);
+
+            var match = HardcodedConnStringRegex().Match(text);
+            if (!match.Success) continue;
+
+            SqlConnectionStringBuilder builder;
+            try { builder = new SqlConnectionStringBuilder(match.Value); }
+            catch { continue; }
+
+            if (!string.IsNullOrWhiteSpace(builder.InitialCatalog) && IsLocalServerReference(builder.DataSource))
+                return builder;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// True if <paramref name="server"/> refers to "wherever this grading worker process is
+    /// running" — the common set of local aliases ("(local)", ".", "localhost", "127.0.0.1") or
+    /// the exact host the worker's own configured SQL Server connection string uses. A connection
+    /// string pointing anywhere else is genuinely unreachable from the sandbox and is left to fail
+    /// as-is — there's no safe way to intercept traffic to an arbitrary remote server.
+    /// </summary>
+    private static readonly string[] LocalServerAliases = ["local", ".", "localhost", "127.0.0.1"];
+
+    private bool IsLocalServerReference(string server)
+    {
+        var bare = server.Split(',', '\\')[0].Trim().Trim('(', ')');
+        if (LocalServerAliases.Contains(bare, StringComparer.OrdinalIgnoreCase)) return true;
+
+        var masterHost = GetMasterConnectionStringBuilder().DataSource.Split(',', '\\')[0].Trim();
+        return bare.Equals(masterHost, StringComparison.OrdinalIgnoreCase);
     }
 
     private static List<string> FindStudentConnectionStringKeys(string dir)
@@ -309,6 +470,154 @@ public partial class ArtifactRunner(
 
         throw new InvalidOperationException($"No suitable .csproj or published DLL found in {dir}");
     }
+
+    private static readonly string NuGetPackagesRoot =
+        Environment.GetEnvironmentVariable("NUGET_PACKAGES")
+        ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".nuget", "packages");
+
+    private static string CurrentWinRid => RuntimeInformation.ProcessArchitecture switch
+    {
+        Architecture.X64 => "win-x64",
+        Architecture.X86 => "win-x86",
+        Architecture.Arm64 => "win-arm64",
+        Architecture.Arm => "win-arm",
+        _ => "win-x64"
+    };
+
+    /// <summary>
+    /// Some student publish outputs are missing the "runtimes/{rid}/{native|lib\{tfm}}/" assets
+    /// that their own {App}.deps.json declares for RID-specific dependencies — e.g. a partial or
+    /// mixed dotnet publish that flattens the generic managed asset into the app root but drops
+    /// the win/unix-specific copies, or drops a native asset (like Microsoft.Data.SqlClient's
+    /// SNI.dll) entirely. The .NET host does not fall back to a same-name flat copy once
+    /// deps.json advertises a RID-specific path for the current platform: it commits to the
+    /// declared path and throws FileNotFoundException (or, for a missing native SNI dependency,
+    /// PlatformNotSupportedException) if nothing is there.
+    /// Repair tries two sources, in order: (1) a version-matched flat copy already sitting in the
+    /// app root, (2) the exact same package/version the student's own project restored, pulled
+    /// from this machine's local NuGet cache (the same nupkg dotnet publish itself would have
+    /// copied the asset out of). Both are publish-output completeness fixes — neither changes
+    /// anything the student wrote.
+    /// </summary>
+    private void RepairMissingRuntimeAssets(ExecutableTarget target)
+    {
+        if (target.IsProject) return; // "dotnet run" from source has no deps.json to mis-resolve
+
+        var depsPath = Path.ChangeExtension(target.Path, ".deps.json");
+        if (!File.Exists(depsPath)) return;
+
+        var depsText = File.ReadAllText(depsPath);
+        // Most student publishes are plain framework-dependent with no RID-specific assets at
+        // all — skip the full JSON parse and object walk below for the common case.
+        if (!depsText.Contains("\"runtimeTargets\"", StringComparison.Ordinal)) return;
+
+        JsonNode? root;
+        try { root = JsonNode.Parse(depsText); }
+        catch { return; }
+
+        if (root?["targets"] is not JsonObject targets) return;
+        var appDir = Path.GetDirectoryName(target.Path)!;
+        var winRid = CurrentWinRid;
+
+        // Managed assemblies are declared under the generic "win" RID; native libraries (e.g. the
+        // SqlClient SNI dependency) are declared under this machine's specific win-{arch} RID —
+        // both are RID buckets the .NET host resolves against on this platform.
+        var winAssets = targets
+            .Select(kv => kv.Value)
+            .OfType<JsonObject>()
+            .SelectMany(libs => libs) // library entries keyed "PackageId/Version"
+            .Select(lib => (LibraryKey: lib.Key, RuntimeTargets: lib.Value?["runtimeTargets"] as JsonObject))
+            .Where(l => l.RuntimeTargets != null)
+            .SelectMany(l => l.RuntimeTargets!.Select(rt => (l.LibraryKey, RelPath: rt.Key, Meta: rt.Value as JsonObject)))
+            .Where(a => a.Meta != null && a.Meta["rid"]?.GetValue<string>() is { } rid && (rid == "win" || rid == winRid))
+            .Select(a => (a.LibraryKey, a.RelPath, Meta: a.Meta!));
+
+        foreach (var (libraryKey, relPath, assetMeta) in winAssets) // relPath e.g. "runtimes/win-x64/native/Microsoft.Data.SqlClient.SNI.dll"
+        {
+            var expectedPath = Path.Combine(appDir, relPath.Replace('/', Path.DirectorySeparatorChar));
+            if (File.Exists(expectedPath)) continue; // deps.json already satisfied — nothing to do
+
+            var source = ResolveFromNuGetCache(libraryKey, relPath);
+            if (source == null)
+            {
+                // Last resort only: some packages ship a generic/portable build alongside the
+                // RID-specific one under the same version number (e.g. Microsoft.Data.SqlClient's
+                // netstandard2.0 build, which throws PlatformNotSupportedException by design). A
+                // flat copy at the app root cannot be trusted to be the RID-specific asset just
+                // because its reported version matches — only use it when nothing from NuGet
+                // (exact or nearby version) is available to salvage instead.
+                var flatCandidate = Path.Combine(appDir, Path.GetFileName(relPath));
+                if (File.Exists(flatCandidate) && MatchesDeclaredVersion(flatCandidate, assetMeta))
+                    source = flatCandidate;
+            }
+            if (source == null) continue; // no salvageable copy present anywhere
+
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(expectedPath)!);
+                File.Copy(source, expectedPath, overwrite: false);
+                logger.LogWarning(
+                    "Repaired incomplete publish output: copied {Source} into missing {RelPath} " +
+                    "(declared in {Deps} but absent from the submitted artifact).",
+                    source, relPath, Path.GetFileName(depsPath));
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Failed to repair missing runtime asset {RelPath}", relPath);
+            }
+        }
+    }
+
+    private static bool MatchesDeclaredVersion(string candidatePath, JsonObject assetMeta)
+    {
+        if (assetMeta["assemblyVersion"]?.GetValue<string>() is { } asmVersion)
+        {
+            try { return System.Reflection.AssemblyName.GetAssemblyName(candidatePath).Version?.ToString() == asmVersion; }
+            catch { return false; }
+        }
+        if (assetMeta["fileVersion"]?.GetValue<string>() is { } fileVersion)
+        {
+            try { return FileVersionInfo.GetVersionInfo(candidatePath).FileVersion == fileVersion; }
+            catch { return false; }
+        }
+        return true; // no version metadata declared to check against — accept on name match alone
+    }
+
+    private static string? ResolveFromNuGetCache(string libraryKey, string relPath)
+    {
+        var slash = libraryKey.LastIndexOf('/');
+        if (slash < 0) return null;
+
+        var packageId = libraryKey[..slash].ToLowerInvariant();
+        var declaredVersion = libraryKey[(slash + 1)..];
+        var relFsPath = relPath.Replace('/', Path.DirectorySeparatorChar);
+
+        var exactPath = Path.Combine(NuGetPackagesRoot, packageId, declaredVersion, relFsPath);
+        if (File.Exists(exactPath)) return exactPath;
+
+        // Exact version isn't restored on this machine (e.g. the grading host's cache lags the
+        // student project's pinned version). A nearby cached version of the same package's
+        // RID-specific asset is a much safer substitute than falling through to a flat copy at
+        // the app root — same actual implementation, just a different patch release.
+        var packageDir = Path.Combine(NuGetPackagesRoot, packageId);
+        if (!Directory.Exists(packageDir)) return null;
+
+        var declared = Version.TryParse(declaredVersion, out var dv) ? dv : null;
+        return Directory.GetDirectories(packageDir)
+            .Select(d => (Path: Path.Combine(d, relFsPath), Version: Version.TryParse(Path.GetFileName(d), out var v) ? v : null))
+            .Where(x => x.Version != null && File.Exists(x.Path))
+            .OrderBy(x => declared == null ? 0 : Math.Abs(VersionDistance(x.Version!, declared)))
+            .Select(x => x.Path)
+            .FirstOrDefault();
+    }
+
+    private static long VersionDistance(Version a, Version b) => VersionWeight(a) - VersionWeight(b);
+
+    private static long VersionWeight(Version v) =>
+        Math.Max(v.Major, 0) * 1_000_000_000L +
+        Math.Max(v.Minor, 0) * 1_000_000L +
+        Math.Max(v.Build, 0) * 1_000L +
+        Math.Max(v.Revision, 0);
 
     private static void StripPublishingListenConfigFromAppSettings(string rootDir)
     {

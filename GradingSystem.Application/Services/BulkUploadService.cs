@@ -72,11 +72,13 @@ public class BulkUploadService(
                 {
                     foreach (var question in questions)
                     {
-                        // Look for subfolder matching ArtifactFolderName or numeric index
+                        // Look for subfolder matching ArtifactFolderName (exact, then case-insensitive)
                         var qFolder = FindQuestionFolder(studentDir, question.ArtifactFolderName);
                         if (qFolder is null)
                         {
-                            logger.LogWarning("Student '{Folder}': question folder '{Q}' not found", folderName, question.ArtifactFolderName);
+                            var msg = $"Student '{folderName}': question folder '{question.ArtifactFolderName}' not found — this question will be graded as if not submitted. Check that Question.ArtifactFolderName matches the real submission folder name (e.g. \"1\"/\"2\", not \"Q1\"/\"Q2\").";
+                            logger.LogWarning(msg);
+                            result.Errors.Add(msg);
                             continue;
                         }
 
@@ -84,7 +86,9 @@ public class BulkUploadService(
                         var solutionZip = Directory.GetFiles(qFolder, "*.zip", SearchOption.TopDirectoryOnly).FirstOrDefault();
                         if (solutionZip is null)
                         {
-                            logger.LogWarning("Student '{Folder}': no zip found in '{Q}'", folderName, qFolder);
+                            var msg = $"Student '{folderName}': no zip found in '{qFolder}' — this question will be graded as if not submitted.";
+                            logger.LogWarning(msg);
+                            result.Errors.Add(msg);
                             continue;
                         }
 

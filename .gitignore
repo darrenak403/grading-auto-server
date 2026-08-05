@@ -485,6 +485,9 @@ test-*.ps1
 
 plans
 
+# Raw student submission archives (huge, not source, causes GitHub push timeouts/size limit)
+support-grading-su26/Real_Submittion/
+
 # my-skills generated files
 .claude/
 CLAUDE.md

@@ -153,7 +153,7 @@ task playwright:down                          # sau khi chấm xong Q2, tắt CD
 
 1. `POST /assignments` — tạo assignment.
 2. `PUT /assignments/{id}/resources` — upload `database.sql` (dùng cho Q1) và/hoặc Given API `.zip` / `GivenApiBaseUrl` (dùng cho Q2).
-3. `POST /assignments/{assignmentId}/questions` — tạo Question, chỉ định `Type = Api` (Q1) hoặc `Type = Razor` (Q2), `ArtifactFolderName` (vd. `Q1`, `Q2` — khớp tên thư mục trong artifact sinh viên nộp).
+3. `POST /assignments/{assignmentId}/questions` — tạo Question, chỉ định `Type = Api` (Q1) hoặc `Type = Razor` (Q2), `ArtifactFolderName` — **phải khớp chính xác** tên thư mục câu hỏi trong zip sinh viên nộp thật (PEA_Client đặt tên thư mục theo số thứ tự câu hỏi, vd. `1`, `2` — KHÔNG phải `Q1`/`Q2`; `Q1_`/`Q2_` chỉ là tên thư mục publish output nằm *bên trong* `solution.zip`). Đặt sai giá trị này khiến câu hỏi bị bỏ qua khi bulk-upload.
 4. `POST /questions/{questionId}/test-cases` — tạo test case theo đúng loại câu hỏi:
    - Q1: `HttpMethod`, `UrlTemplate`, `Input`, `ExpectedStatus`, `ExpectedBody` (so JSON response).
    - Q2: `HttpMethod` = URL trang Razor cần mở, `Selector`/`ElementId`/`ElementText`/`SelectorMinCount` (kiểm tra DOM), `Order` + `Extract` khi cần chạy tuần tự nhiều bước (vd. tạo record ở bước 1, lấy id dùng cho bước 2).
@@ -162,7 +162,7 @@ task playwright:down                          # sau khi chấm xong Q2, tắt CD
 
 5. `POST /assignments/{id}/participants/import` — import danh sách thí sinh (CSV: mã SV).
 6. Nộp bài — chọn một trong hai:
-   - `POST /assignments/{id}/bulk-upload` — upload `master.zip` (chứa cả thư mục `Q1/` và `Q2/` theo `ArtifactFolderName`), thêm submission vào round **hiện tại**.
+   - `POST /assignments/{id}/bulk-upload` — upload `master.zip` (mỗi sinh viên là 1 thư mục con ở gốc zip, bên trong chứa thư mục con theo `ArtifactFolderName` của từng câu hỏi, vd. `1/`, `2/`), thêm submission vào round **hiện tại**.
    - `POST /assignments/{id}/rounds` — tạo round mới (tự động đánh số "Lần 1", "Lần 2", ...) rồi upload vào round đó.
 
 ### 3. Chấm bài
