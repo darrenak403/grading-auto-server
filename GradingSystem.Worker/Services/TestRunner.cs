@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Numerics;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -613,7 +615,7 @@ public class TestRunner(
     // for the mismatched parts, not the whole test case. Extra keys in `actual` are tolerated.
     // Arrays are matched positionally (same index compared recursively); a missing/extra-length
     // array counts every expected element in that array as unmatched rather than failing outright.
-    private static (int Matched, int Total) JsonSubsetScore(JsonElement actual, JsonElement expected)
+    internal static (int Matched, int Total) JsonSubsetScore(JsonElement actual, JsonElement expected)
     {
         switch (expected.ValueKind)
         {
@@ -656,8 +658,54 @@ public class TestRunner(
                 return (arrMatched, arrTotal);
 
             default:
-                return (actual.ToString() == expected.ToString() ? 1 : 0, 1);
+                return (JsonLeafValuesEqual(actual, expected) ? 1 : 0, 1);
         }
+    }
+
+    private static bool JsonLeafValuesEqual(JsonElement actual, JsonElement expected)
+    {
+        if (actual.ValueKind == JsonValueKind.Number
+            && expected.ValueKind == JsonValueKind.Number)
+        {
+            return NormalizeJsonNumber(actual.GetRawText())
+                == NormalizeJsonNumber(expected.GetRawText());
+        }
+
+        return actual.ToString() == expected.ToString();
+    }
+
+    private static (bool IsNegative, string Digits, BigInteger Exponent) NormalizeJsonNumber(string raw)
+    {
+        var isNegative = raw[0] == '-';
+        var significandStart = isNegative ? 1 : 0;
+        var exponentMarker = raw.IndexOfAny(['e', 'E'], significandStart);
+        var significandEnd = exponentMarker >= 0 ? exponentMarker : raw.Length;
+        var exponent = exponentMarker >= 0
+            ? BigInteger.Parse(
+                raw.AsSpan(exponentMarker + 1),
+                NumberStyles.AllowLeadingSign,
+                CultureInfo.InvariantCulture)
+            : BigInteger.Zero;
+
+        var significand = raw[significandStart..significandEnd];
+        var decimalPoint = significand.IndexOf('.');
+        var fractionalDigits = decimalPoint >= 0 ? significand.Length - decimalPoint - 1 : 0;
+        var digits = decimalPoint >= 0 ? significand.Remove(decimalPoint, 1) : significand;
+        digits = digits.TrimStart('0');
+
+        if (digits.Length == 0)
+            return (false, "0", BigInteger.Zero);
+
+        exponent -= fractionalDigits;
+
+        var significantLength = digits.Length;
+        while (significantLength > 0 && digits[significantLength - 1] == '0')
+            significantLength--;
+
+        exponent += digits.Length - significantLength;
+        digits = digits[..significantLength];
+
+        return (isNegative, digits, exponent);
     }
 
     private static int CountLeaves(JsonElement expected) => expected.ValueKind switch
