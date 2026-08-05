@@ -235,6 +235,7 @@ public partial class ArtifactRunner(
         {
             ReleasePort(reservedPort);
             ForgetDetectedPort(process.Id);
+            _stderrTail.TryRemove(process.Id, out _);
         }
     }
 
@@ -472,15 +473,26 @@ public partial class ArtifactRunner(
 
     private record ExecutableTarget(bool IsProject, string Path);
 
+    private static bool IsUnderPublishDir(string path) =>
+        path.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            .Any(seg => seg.Equals("publish", StringComparison.OrdinalIgnoreCase));
+
     private static ExecutableTarget FindExecutableTarget(string dir)
     {
-        // 1. Look for published app (has runtimeconfig.json)
-        var runtimeConfigs = Directory.GetFiles(dir, "*.runtimeconfig.json", SearchOption.AllDirectories);
-        foreach (var rc in runtimeConfigs)
-        {
-            var dll = rc.Replace(".runtimeconfig.json", ".dll");
-            if (File.Exists(dll)) return new ExecutableTarget(false, dll);
-        }
+        // 1. Look for published app (has runtimeconfig.json). A submission can contain more than one
+        // build byproduct at once — e.g. a leftover bin/Debug build from the student's last local run
+        // alongside an actual `dotnet publish` output — and Directory.GetFiles' enumeration order is
+        // filesystem-dependent, not "most intentional first". Prefer whichever pair sits under a
+        // `publish` directory (the one output `dotnet publish` produces, and nothing else does); among
+        // ties or when no publish folder exists, prefer the most recently built one. Otherwise an old
+        // Debug build can silently shadow the version the student actually meant to submit.
+        var published = Directory.GetFiles(dir, "*.runtimeconfig.json", SearchOption.AllDirectories)
+            .Select(rc => rc.Replace(".runtimeconfig.json", ".dll"))
+            .Where(File.Exists)
+            .OrderByDescending(IsUnderPublishDir)
+            .ThenByDescending(File.GetLastWriteTimeUtc)
+            .FirstOrDefault();
+        if (published != null) return new ExecutableTarget(false, published);
 
         // 2. Look for raw source code (has .csproj)
         var csproj = Directory.GetFiles(dir, "*.csproj", SearchOption.AllDirectories).FirstOrDefault();
@@ -686,6 +698,18 @@ public partial class ArtifactRunner(
 
     private string BindUrl(int port) => $"http://{opts.Value.BindHost}:{port}";
 
+    // Last few stderr lines per process, kept only so a "never became ready" failure can quote
+    // the student's actual runtime error (unhandled exception, missing config, etc.) in
+    // job.ErrorMessage instead of just saying it timed out — graders otherwise have no way to
+    // see what actually went wrong short of digging through worker log files.
+    private const int StderrTailMaxLines = 20;
+    private readonly ConcurrentDictionary<int, ConcurrentQueue<string>> _stderrTail = new();
+
+    private string? GetStderrTail(int processId) =>
+        _stderrTail.TryGetValue(processId, out var tail) && !tail.IsEmpty
+            ? string.Join(Environment.NewLine, tail)
+            : null;
+
     private Process StartDotnet(ExecutableTarget target, int port, Dictionary<string, string>? env = null)
     {
         var bindUrl = BindUrl(port);
@@ -730,8 +754,12 @@ public partial class ArtifactRunner(
         };
         process.ErrorDataReceived += (_, e) =>
         {
-            if (!string.IsNullOrWhiteSpace(e.Data))
-                logger.LogWarning("[student-stderr] {Line}", e.Data);
+            if (string.IsNullOrWhiteSpace(e.Data)) return;
+            logger.LogWarning("[student-stderr] {Line}", e.Data);
+
+            var tail = _stderrTail.GetOrAdd(process.Id, static _ => new ConcurrentQueue<string>());
+            tail.Enqueue(e.Data);
+            while (tail.Count > StderrTailMaxLines) tail.TryDequeue(out string _);
         };
         process.OutputDataReceived += (_, e) =>
         {
@@ -816,8 +844,10 @@ public partial class ArtifactRunner(
             {
                 // Wait briefly for async stderr/stdout readers to flush buffered output
                 await Task.Delay(300, CancellationToken.None);
+                var exitStderrTail = GetStderrTail(process.Id);
                 throw new InvalidOperationException(
-                    $"Student app exited with code {process.ExitCode} (0x{process.ExitCode:X8}) before becoming ready — see [student-stderr] lines above.");
+                    $"Student app exited with code {process.ExitCode} (0x{process.ExitCode:X8}) before becoming ready." +
+                    (exitStderrTail is null ? " (no stderr output captured)" : $" [student-stderr]: {exitStderrTail}"));
             }
 
             // Probe by our own BindHost:port, never the raw address Kestrel logged — a hardcoded
@@ -837,8 +867,10 @@ public partial class ArtifactRunner(
             }
         }
 
+        var timeoutStderrTail = GetStderrTail(process.Id);
         throw new TimeoutException(
-            $"App did not start within {opts.Value.ArtifactHealthCheckTimeoutSeconds}s: {BindUrl(assignedPort)}");
+            $"App did not start within {opts.Value.ArtifactHealthCheckTimeoutSeconds}s: {BindUrl(assignedPort)}" +
+            (timeoutStderrTail is null ? "" : $" [student-stderr]: {timeoutStderrTail}"));
     }
 
     private static bool IsSetupOnlyBatch(string batch)
