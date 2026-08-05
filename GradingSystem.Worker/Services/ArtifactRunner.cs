@@ -90,12 +90,13 @@ public partial class ArtifactRunner(
             // or shutdown cancellation) — otherwise a startup-time failure leaks both forever.
             ctx.GivenApiProcess = givenProcess;
             ctx.GivenApiPort = givenPort;
+            ctx.GivenApiReservedPort = givenPort;
 
-            var bindHost = opts.Value.BindHost;
-            await WaitForPortAsync($"http://{bindHost}:{givenPort}", givenProcess, ct);
+            ctx.GivenApiPort = await WaitForPortAsync(givenPort, givenProcess, ct);
+            ForgetDetectedPort(givenProcess.Id);
 
-            effectiveGivenApiBaseUrl = $"http://{bindHost}:{givenPort}";
-            logger.LogInformation("Given API started on port {Port} for job {JobId}", givenPort, job.Id);
+            effectiveGivenApiBaseUrl = BindUrl(ctx.GivenApiPort);
+            logger.LogInformation("Given API started on port {Port} for job {JobId}", ctx.GivenApiPort, job.Id);
         }
 
         foreach (var question in questions)
@@ -159,12 +160,25 @@ public partial class ArtifactRunner(
             // Attach to ctx before awaiting the health check — see the matching comment above
             // for the given-API process — so a startup-time failure still leaves the process
             // and port reachable for CleanupAsync instead of leaking them.
-            ctx.QuestionApps[question.Id] = new QuestionApp { Process = process, Port = port };
+            var questionApp = new QuestionApp { Process = process, Port = port, ReservedPort = port };
+            ctx.QuestionApps[question.Id] = questionApp;
 
-            await WaitForPortAsync($"http://{opts.Value.BindHost}:{port}", process, ct);
+            var actualPort = await WaitForPortAsync(port, process, ct);
+            ForgetDetectedPort(process.Id);
+
+            if (actualPort != port)
+            {
+                // Student's own hardcoded URL (Program.cs or launchSettings.json) won over the
+                // --urls/ASPNETCORE_URLS we passed — grade against wherever it actually came up.
+                logger.LogWarning(
+                    "Question {QId}: app bound to port {ActualPort} instead of assigned {AssignedPort} — " +
+                    "likely a hardcoded URL in the student's submission; grading against the actual port",
+                    question.Id, actualPort, port);
+                questionApp.Port = actualPort;
+            }
 
             logger.LogInformation("Q{Type} app on port {Port} for question {QId}",
-                question.Type, port, question.Id);
+                question.Type, questionApp.Port, question.Id);
         }
     }
 
@@ -173,26 +187,12 @@ public partial class ArtifactRunner(
         foreach (var (qId, app) in ctx.QuestionApps)
         {
             if (app.GivenUrlInvalid || app.NotSubmitted) continue;
-            try
-            {
-                if (!app.Process.HasExited)
-                    app.Process.Kill(entireProcessTree: true);
-                app.Process.WaitForExit(5000);
-            }
-            catch (Exception ex) { logger.LogWarning(ex, "Failed to kill process for question {QId}", qId); }
-            finally { ReleasePort(app.Port); }
+            KillAndRelease(app.Process, app.ReservedPort, qId);
         }
 
         if (ctx.GivenApiProcess != null)
         {
-            try
-            {
-                if (!ctx.GivenApiProcess.HasExited)
-                    ctx.GivenApiProcess.Kill(entireProcessTree: true);
-                ctx.GivenApiProcess.WaitForExit(5000);
-            }
-            catch (Exception ex) { logger.LogWarning(ex, "Failed to kill given API process"); }
-            finally { ReleasePort(ctx.GivenApiPort); }
+            KillAndRelease(ctx.GivenApiProcess, ctx.GivenApiReservedPort, null);
         }
 
         try
@@ -213,6 +213,28 @@ public partial class ArtifactRunner(
             try { await DropDatabaseAsync(shadowDb.Name); }
             catch (Exception ex) { logger.LogWarning(ex, "Failed to drop shadow database {Db}", shadowDb.Name); }
             finally { shadowDb.Lock.Release(); }
+        }
+    }
+
+    private void KillAndRelease(Process process, int reservedPort, Guid? questionId)
+    {
+        try
+        {
+            if (!process.HasExited)
+                process.Kill(entireProcessTree: true);
+            process.WaitForExit(5000);
+        }
+        catch (Exception ex)
+        {
+            if (questionId is { } qId)
+                logger.LogWarning(ex, "Failed to kill process for question {QId}", qId);
+            else
+                logger.LogWarning(ex, "Failed to kill given API process");
+        }
+        finally
+        {
+            ReleasePort(reservedPort);
+            ForgetDetectedPort(process.Id);
         }
     }
 
@@ -651,10 +673,23 @@ public partial class ArtifactRunner(
         }
     }
 
+    // Some student submissions hardcode their own port/URL (Program.cs UseUrls/Run, or
+    // launchSettings.json applicationUrl), which silently overrides the --urls/ASPNETCORE_URLS
+    // we pass to `dotnet run` — the app then binds to a different port than the one we assigned
+    // and reserved. Grading doesn't need to fight that: we parse Kestrel's own "Now listening on"
+    // startup log to learn whichever port the app actually bound to, keyed by process id. Only the
+    // port number is trusted — the logged host can be a wildcard (0.0.0.0, +, *, [::]) that isn't
+    // a connectable destination, so we always reconnect via our own configured BindHost.
+    private readonly ConcurrentDictionary<int, int> _detectedListenPorts = new();
+
+    private void ForgetDetectedPort(int processId) => _detectedListenPorts.TryRemove(processId, out _);
+
+    private string BindUrl(int port) => $"http://{opts.Value.BindHost}:{port}";
+
     private Process StartDotnet(ExecutableTarget target, int port, Dictionary<string, string>? env = null)
     {
-        var bindUrl = $"http://{opts.Value.BindHost}:{port}";
-        
+        var bindUrl = BindUrl(port);
+
         var psi = new ProcessStartInfo("dotnet")
         {
             WorkingDirectory = Path.GetDirectoryName(target.Path),
@@ -678,7 +713,7 @@ public partial class ArtifactRunner(
             psi.ArgumentList.Add(fileName);
             psi.ArgumentList.Add($"--urls={bindUrl}");
         }
-        
+
         logger.LogInformation("StartDotnet -> WorkingDir: {Wd}, Args: {Args}", psi.WorkingDirectory, string.Join(" ", psi.ArgumentList));
 
         psi.Environment["ASPNETCORE_URLS"] = bindUrl;
@@ -698,11 +733,28 @@ public partial class ArtifactRunner(
             if (!string.IsNullOrWhiteSpace(e.Data))
                 logger.LogWarning("[student-stderr] {Line}", e.Data);
         };
+        process.OutputDataReceived += (_, e) =>
+        {
+            // A self-signed dev cert on an https endpoint won't validate against HttpClient's
+            // default handler, so only http binds are worth detecting — once one is recorded for
+            // this process there's nothing left to look for in later lines.
+            if (_detectedListenPorts.ContainsKey(process.Id)) return;
+
+            var match = NowListeningOnRegex().Match(e.Data ?? "");
+            if (match.Success && int.TryParse(match.Groups[1].Value, out var listenPort))
+                _detectedListenPorts.TryAdd(process.Id, listenPort);
+        };
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
 
         return process;
     }
+
+    // Only the trailing port is extracted, and only for a plain http endpoint — the host portion
+    // of a hardcoded bind can be a wildcard (0.0.0.0, +, *, [::]) that HttpClient can't connect
+    // to directly, and an https-only endpoint isn't gradeable against a self-signed dev cert.
+    [GeneratedRegex(@"Now listening on:\s*http://.*:(\d+)/?\s*$")]
+    private static partial Regex NowListeningOnRegex();
 
     internal int PickPort()
     {
@@ -745,7 +797,13 @@ public partial class ArtifactRunner(
         catch { return false; }
     }
 
-    private async Task WaitForPortAsync(string baseUrl, Process process, CancellationToken ct)
+    /// <summary>
+    /// Waits for the app to accept HTTP requests and returns the port it actually answered on.
+    /// Grading doesn't care which port that is — a student's own hardcoded URL config can make
+    /// the app bind somewhere other than <paramref name="assignedPort"/>, so once Kestrel reports
+    /// the real bound port via <see cref="_detectedListenPorts"/> we probe that instead.
+    /// </summary>
+    private async Task<int> WaitForPortAsync(int assignedPort, Process process, CancellationToken ct)
     {
         using var probe = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
         var deadline = DateTime.UtcNow.AddSeconds(opts.Value.ArtifactHealthCheckTimeoutSeconds);
@@ -762,10 +820,15 @@ public partial class ArtifactRunner(
                     $"Student app exited with code {process.ExitCode} (0x{process.ExitCode:X8}) before becoming ready — see [student-stderr] lines above.");
             }
 
+            // Probe by our own BindHost:port, never the raw address Kestrel logged — a hardcoded
+            // wildcard bind (0.0.0.0, +, *, [::]) isn't a connectable destination on every
+            // platform/runtime, and TestRunner reconstructs request URLs the same way later.
+            var probePort = _detectedListenPorts.TryGetValue(process.Id, out var detectedPort) ? detectedPort : assignedPort;
+
             try
             {
-                await probe.GetAsync(baseUrl, ct);
-                return;
+                await probe.GetAsync(BindUrl(probePort), ct);
+                return probePort;
             }
             catch (Exception ex) when (ex is HttpRequestException
                                     || (ex is TaskCanceledException && !ct.IsCancellationRequested))
@@ -775,7 +838,7 @@ public partial class ArtifactRunner(
         }
 
         throw new TimeoutException(
-            $"App did not start within {opts.Value.ArtifactHealthCheckTimeoutSeconds}s: {baseUrl}");
+            $"App did not start within {opts.Value.ArtifactHealthCheckTimeoutSeconds}s: {BindUrl(assignedPort)}");
     }
 
     private static bool IsSetupOnlyBatch(string batch)

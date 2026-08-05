@@ -5,7 +5,14 @@ namespace GradingSystem.Worker.Services;
 public class QuestionApp
 {
     public required Process Process { get; set; }
+    // Port actually used for grading HTTP requests. Usually equals ReservedPort, but a student's
+    // own hardcoded URL (Program.cs UseUrls/Run, or launchSettings.json) can make the app bind to
+    // a different port than the one we assigned — grading follows whatever port the app actually
+    // came up on, see ArtifactRunner.WaitForPortAsync.
     public int Port { get; set; }
+    // Port reserved via ArtifactRunner.PickPort() for this app; always release *this* port in
+    // cleanup, even if Port was overwritten with the app's actual (different) bound port.
+    public int ReservedPort { get; set; }
     // Set true when Q2 student appsettings has wrong GivenApiBaseUrl — score = 0, app not started
     public bool GivenUrlInvalid { get; set; }
     public string? GivenUrlInvalidReason { get; set; }
@@ -34,8 +41,11 @@ public class StudentContext
     /// <summary>Process của given API (khởi động từ given.zip), null nếu dùng GivenApiBaseUrl tĩnh</summary>
     public Process? GivenApiProcess { get; set; }
 
-    /// <summary>Port của given API đang chạy, 0 nếu chưa khởi động</summary>
+    /// <summary>Port của given API đang chạy (port thực tế app đã bind), 0 nếu chưa khởi động</summary>
     public int GivenApiPort { get; set; }
+
+    /// <summary>Port đã PickPort() cho given API — dùng để ReleasePort khi cleanup, có thể khác GivenApiPort</summary>
+    public int GivenApiReservedPort { get; set; }
 
     /// <summary>
     /// Set when an API question's student code hardcodes its own SQL connection string in
