@@ -267,27 +267,45 @@ public class BulkUploadService(
 
     /// Descends through wrapper directories (e.g. an exam-code folder wrapping every
     /// student folder) until it finds the level whose directory names match participant
-    /// usernames. Falls back to the immediate top-level directories if no level matches
-    /// (preserves the original "no matching participant found" error reporting).
+    /// usernames. Picks the depth with the MOST matches (not the first non-zero match) so
+    /// inconsistently-nested zips — where one folder coincidentally matches at a shallower
+    /// depth than the rest of the class — don't cause the real cohort to be missed. Falls
+    /// back to the immediate top-level directories if no level matches (preserves the
+    /// original "no matching participant found" error reporting).
     private static string[] FindStudentDirs(
         string tempRoot, IReadOnlyDictionary<string, Participant> participantByUsername)
     {
         const int maxDepth = 5;
         var topLevelDirs = Directory.GetDirectories(tempRoot);
+
         var currentLevel = topLevelDirs;
+        var bestLevel = topLevelDirs;
+        var bestMatchCount = 0;
 
         for (var depth = 0; depth < maxDepth; depth++)
         {
             if (currentLevel.Length == 0) break;
 
             var matchCount = currentLevel.Count(d => participantByUsername.ContainsKey(Path.GetFileName(d)));
-            if (matchCount > 0) return currentLevel;
+            if (matchCount > bestMatchCount)
+            {
+                bestMatchCount = matchCount;
+                bestLevel = currentLevel;
+            }
 
-            currentLevel = currentLevel.SelectMany(Directory.GetDirectories).ToArray();
+            if (matchCount == participantByUsername.Count) break;
+
+            currentLevel = currentLevel
+                .Where(d => !IsBuildArtifactDir(Path.GetFileName(d)))
+                .SelectMany(Directory.GetDirectories)
+                .ToArray();
         }
 
-        return topLevelDirs;
+        return bestMatchCount > 0 ? bestLevel : topLevelDirs;
     }
+
+    private static bool IsBuildArtifactDir(string name) =>
+        name is "bin" or "obj" or "node_modules" or ".git" or ".vs";
 
     private static string? FindQuestionFolder(string studentDir, string artifactFolderName)
     {

@@ -55,7 +55,7 @@ Copy từ `docker/.env.example` rồi điền:
 | `RABBITMQ_PASSWORD` | RabbitMQ password | `guest` | |
 | `PLAYWRIGHT_CDP_PORT` | Port Chromium CDP | `9222` | Dùng khi chạy `task run` |
 | `Playwright__BrowserCdpEndpoint` | Endpoint Chromium cho Worker | `http://127.0.0.1:9222` | Bỏ comment để chấm câu Razor qua Playwright |
-| `WORKER_MAX_CONCURRENT_JOBS` | Số job chấm song song (PE) | `3` (mặc định: auto từ CPU) | Nếu không đặt → `Math.Clamp(CoreCount - 1, 1, 8)` |
+| `WORKER_MAX_CONCURRENT_JOBS` | Số job chấm song song (PE) | `1` (mặc định: chấm tuần tự) | |
 | `WORKER_SUBMISSION_TIMEOUT_SECONDS` | Timeout per bài (giây) | `90` | Vượt quá → kill process, mark Failed |
 
 > `POSTGRES_PUBLISH_PORT` phải khớp với `appsettings.Development.json` (connection string).

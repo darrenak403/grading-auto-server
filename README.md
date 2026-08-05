@@ -162,7 +162,7 @@ task playwright:down                          # sau khi chấm xong Q2, tắt CD
 
 5. `POST /assignments/{id}/participants/import` — import danh sách thí sinh (CSV: mã SV).
 6. Nộp bài — chọn một trong hai:
-   - `POST /assignments/{id}/bulk-upload` — upload `master.zip` (mỗi sinh viên là 1 thư mục con ở gốc zip, bên trong chứa thư mục con theo `ArtifactFolderName` của từng câu hỏi, vd. `1/`, `2/`), thêm submission vào round **hiện tại**.
+   - `POST /assignments/{id}/bulk-upload` — upload `master.zip` (mỗi sinh viên là 1 thư mục con ở gốc zip hoặc bên trong 1 thư mục wrapper, mỗi thư mục sinh viên chứa thư mục con theo `ArtifactFolderName` của từng câu hỏi, vd. `1/`, `2/`), thêm submission vào round **hiện tại**.
    - `POST /assignments/{id}/rounds` — tạo round mới (tự động đánh số "Lần 1", "Lần 2", ...) rồi upload vào round đó.
 
 ### 3. Chấm bài
@@ -284,7 +284,7 @@ storage/
 - API versioning: v1 (mặc định), v2.
 - Upload tối đa **200 MB**.
 - **Worker concurrency:**
-  - `MaxConcurrentJobs`: Mặc định = `Math.Clamp(CoreCount - 1, 1, 8)` (tự động theo CPU).
+  - `MaxConcurrentJobs`: Mặc định = `1` (chấm tuần tự, một bài tại một lúc).
     Cấu hình trong `.env` qua `WORKER_MAX_CONCURRENT_JOBS` hoặc appsettings.json (`Worker:MaxConcurrentJobs`).
   - `SubmissionTimeoutSeconds`: Mặc định = **90 giây**. Cấu hình qua `WORKER_SUBMISSION_TIMEOUT_SECONDS`.
     Timeout này áp dụng toàn bộ quá trình chấm một bài (artifact run + test execution); vượt quá sẽ kill process và mark Failed.

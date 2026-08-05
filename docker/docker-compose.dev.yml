@@ -131,12 +131,12 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       ConnectionStrings__Postgres: 'Host=postgres;Port=5432;Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}'
-      ConnectionStrings__SqlServer: 'Server=sqlserver,1433;User Id=sa;Password=${SA_PASSWORD};TrustServerCertificate=true'
+      ConnectionStrings__SqlServer: 'Server=sqlserver,1433;User Id=sa;Password=${SA_PASSWORD};TrustServerCertificate=true;ConnectRetryCount=5;ConnectRetryInterval=10'
       Storage__BasePath: /storage
       RabbitMQ__Host: rabbitmq://rabbitmq
       RabbitMQ__Username: ${RABBITMQ_USER}
       RabbitMQ__Password: ${RABBITMQ_PASSWORD}
-      Worker__MaxConcurrentJobs: ${WORKER_MAX_CONCURRENT_JOBS:-3}
+      Worker__MaxConcurrentJobs: ${WORKER_MAX_CONCURRENT_JOBS:-1}
       Supabase__Url: ${SUPABASE_URL}
       Supabase__ServiceRoleKey: ${SUPABASE_SERVICE_ROLE_KEY}
       Supabase__AutoSync: ${SUPABASE_AUTO_SYNC:-true}
