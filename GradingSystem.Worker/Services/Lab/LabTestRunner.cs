@@ -10,7 +10,14 @@ public class LabTestRunner(IHttpClientFactory httpClientFactory, ILogger<LabTest
 {
     private static readonly JsonSerializerOptions _jsonOpts = new(JsonSerializerDefaults.Web);
     private static readonly Regex _variablePattern = new(@"\{\{(?<name>[^{}]+)\}\}", RegexOptions.Compiled);
-    private sealed record SendResult(int StatusCode, string Body, string? InputJson, string? ErrorMessage);
+    private sealed record SendResult(
+        int StatusCode,
+        string Body,
+        string? InputJson,
+        string? ErrorMessage,
+        bool StudentApiUnavailable);
+
+    private sealed record TestCaseRunOutcome(LabTestCaseResult Result, string? StopRemainingReason);
 
     public async Task<List<LabTestCaseResult>> RunAsync(
         string baseUrl, Guid jobId, IEnumerable<LabTestCase> testCases, CancellationToken ct)
@@ -19,11 +26,29 @@ public class LabTestRunner(IHttpClientFactory httpClientFactory, ILogger<LabTest
         var variables = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         using var client = httpClientFactory.CreateClient();
         client.Timeout = TimeSpan.FromSeconds(10);
+        var normalizedBaseUrl = baseUrl.TrimEnd('/');
+        string? skipRemainingReason = null;
 
         foreach (var tc in testCases.OrderBy(t => t.Order).ThenBy(t => t.CreatedAt))
         {
-            var result = await RunSingleAsync(tc, baseUrl, jobId, client, variables, ct);
+            if (skipRemainingReason is not null)
+            {
+                var skippedUrl = BuildUrl(normalizedBaseUrl, tc.UrlTemplate, variables);
+                var skippedResult = Fail(tc, jobId, skippedUrl, skipRemainingReason);
+                results.Add(skippedResult);
+                logger.LogInformation(
+                    "Job {JobId} tc {TcId} ({Method} {Url}): skipped after previous API failure",
+                    jobId, tc.Id, tc.HttpMethod, tc.UrlTemplate);
+                continue;
+            }
+
+            var outcome = await RunSingleAsync(tc, normalizedBaseUrl, jobId, client, variables, ct);
+            var result = outcome.Result;
             results.Add(result);
+
+            if (outcome.StopRemainingReason is not null)
+                skipRemainingReason = BuildSkipRemainingReason(outcome.StopRemainingReason);
+
             logger.LogInformation(
                 "Job {JobId} tc {TcId} ({Method} {Url}): passed={Passed} status={Status}",
                 jobId, tc.Id, tc.HttpMethod, tc.UrlTemplate, result.Passed, result.ActualStatusCode);
@@ -32,9 +57,9 @@ public class LabTestRunner(IHttpClientFactory httpClientFactory, ILogger<LabTest
         return results;
     }
 
-    private async Task<LabTestCaseResult> RunSingleAsync(
+    private async Task<TestCaseRunOutcome> RunSingleAsync(
         LabTestCase tc,
-        string baseUrl,
+        string normalizedBaseUrl,
         Guid jobId,
         HttpClient client,
         Dictionary<string, string> variables,
@@ -43,7 +68,7 @@ public class LabTestRunner(IHttpClientFactory httpClientFactory, ILogger<LabTest
         var resolvedUrlTemplate = ResolveTemplate(tc.UrlTemplate, variables);
         var resolvedInputJson = ResolveTemplate(tc.InputJson, variables);
         var resolvedHeadersJson = ResolveTemplate(tc.HeadersJson, variables);
-        var url = baseUrl.TrimEnd('/') + resolvedUrlTemplate;
+        var url = normalizedBaseUrl + resolvedUrlTemplate;
         var method = new HttpMethod(tc.HttpMethod.ToUpperInvariant());
         var requiresAuthorization = HasAuthorizationHeader(resolvedHeadersJson);
 
@@ -59,7 +84,7 @@ public class LabTestRunner(IHttpClientFactory httpClientFactory, ILogger<LabTest
                 if (anonymousStatus is not 401 and not 403)
                 {
                     var anonymousBody = await anonymousResponse.Content.ReadAsStringAsync(ct);
-                    return new LabTestCaseResult
+                    return new TestCaseRunOutcome(new LabTestCaseResult
                     {
                         LabGradingJobId = jobId,
                         LabTestCaseId = tc.Id,
@@ -68,12 +93,19 @@ public class LabTestRunner(IHttpClientFactory httpClientFactory, ILogger<LabTest
                         ActualStatusCode = anonymousStatus,
                         ActualResponse = TrimResponse(anonymousBody),
                         ErrorMessage = $"Expected protected endpoint to reject anonymous request with 401 or 403, got {anonymousStatus}.",
-                    };
+                    }, null);
                 }
+            }
+            catch (Exception ex) when (IsStudentApiUnavailable(ex, ct))
+            {
+                var message = $"Anonymous auth check HTTP error: {ex.Message}";
+                return new TestCaseRunOutcome(Fail(tc, jobId, url, message), message);
             }
             catch (Exception ex)
             {
-                return Fail(tc, jobId, url, $"Anonymous auth check HTTP error: {ex.Message}");
+                return new TestCaseRunOutcome(
+                    Fail(tc, jobId, url, $"Anonymous auth check HTTP error: {ex.Message}"),
+                    null);
             }
         }
 
@@ -86,7 +118,11 @@ public class LabTestRunner(IHttpClientFactory httpClientFactory, ILogger<LabTest
             ct);
 
         if (sendResult.ErrorMessage is not null)
-            return Fail(tc, jobId, url, sendResult.ErrorMessage);
+        {
+            return new TestCaseRunOutcome(
+                Fail(tc, jobId, url, sendResult.ErrorMessage),
+                sendResult.StudentApiUnavailable ? sendResult.ErrorMessage : null);
+        }
 
         resolvedInputJson = sendResult.InputJson;
         var actualBody = sendResult.Body;
@@ -103,7 +139,7 @@ public class LabTestRunner(IHttpClientFactory httpClientFactory, ILogger<LabTest
         if (passed)
             TryCaptureVariable(tc.SaveTokenFrom, actualBody, variables);
 
-        return new LabTestCaseResult
+        return new TestCaseRunOutcome(new LabTestCaseResult
         {
             LabGradingJobId = jobId,
             LabTestCaseId   = tc.Id,
@@ -112,7 +148,7 @@ public class LabTestRunner(IHttpClientFactory httpClientFactory, ILogger<LabTest
             ActualStatusCode = actualStatus,
             ActualResponse  = TrimResponse(actualBody),
             ErrorMessage    = errorMessage,
-        };
+        }, null);
     }
 
     private static async Task<SendResult> SendWithEnrollmentRetryAsync(
@@ -138,18 +174,27 @@ public class LabTestRunner(IHttpClientFactory httpClientFactory, ILogger<LabTest
                 if (!ShouldRetryDuplicateEnrollment(method, url, statusCode, body, inputJson)
                     || !TryIncrementEnrollmentCourseId(inputJson, out var nextInputJson))
                 {
-                    return new SendResult(statusCode, body, inputJson, null);
+                    return new SendResult(statusCode, body, inputJson, null, StudentApiUnavailable: false);
                 }
 
                 inputJson = nextInputJson;
             }
+            catch (Exception ex) when (IsStudentApiUnavailable(ex, ct))
+            {
+                return new SendResult(0, string.Empty, inputJson, $"HTTP error: {ex.Message}", StudentApiUnavailable: true);
+            }
             catch (Exception ex)
             {
-                return new SendResult(0, string.Empty, inputJson, $"HTTP error: {ex.Message}");
+                return new SendResult(0, string.Empty, inputJson, $"HTTP error: {ex.Message}", StudentApiUnavailable: false);
             }
         }
 
-        return new SendResult(0, string.Empty, inputJson, "Could not find a non-duplicate enrollment body after 50 retries.");
+        return new SendResult(
+            0,
+            string.Empty,
+            inputJson,
+            "Could not find a non-duplicate enrollment body after 50 retries.",
+            StudentApiUnavailable: false);
     }
 
     private static bool ShouldRetryDuplicateEnrollment(
@@ -274,6 +319,20 @@ public class LabTestRunner(IHttpClientFactory httpClientFactory, ILogger<LabTest
             return variables.TryGetValue(name, out var value) ? value : match.Value;
         });
     }
+
+    private static string BuildUrl(
+        string normalizedBaseUrl,
+        string urlTemplate,
+        IReadOnlyDictionary<string, string> variables) =>
+        normalizedBaseUrl + ResolveTemplate(urlTemplate, variables);
+
+    private static string BuildSkipRemainingReason(string previousError) =>
+        $"Skipped because a previous API request could not reach the student API: {previousError}";
+
+    private static bool IsStudentApiUnavailable(Exception ex, CancellationToken ct) =>
+        ex is HttpRequestException
+        || ex is TimeoutException
+        || (ex is TaskCanceledException && !ct.IsCancellationRequested);
 
     private static bool HasAuthorizationHeader(string? headersJson)
     {

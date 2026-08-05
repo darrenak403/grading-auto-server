@@ -22,7 +22,7 @@ public partial class DockerComposeRunner(
     ILogger<DockerComposeRunner> logger)
 {
     private static readonly SemaphoreSlim _pruneLock = new(1, 1);
-    private static readonly string WorkRoot = Path.Combine(Path.GetTempPath(), "lab-grading");
+    private static readonly string DefaultWorkRoot = Path.Combine(Path.GetTempPath(), "lab-grading");
     private static readonly string DockerFallbackWorkingDirectory = Path.GetTempPath();
     private const int MaxDockerOutputChars = 12_000;
     private static int _completedLabJobs;
@@ -35,9 +35,9 @@ public partial class DockerComposeRunner(
     private static partial Regex LongPortTargetRegex();
 
     /// <summary>Extracts the submission archive to a temp workdir. Returns the workdir path.</summary>
-    public static string Extract(string archivePath, Guid jobId)
+    public string Extract(string archivePath, Guid jobId)
     {
-        var workDir = Path.Combine(WorkRoot, jobId.ToString());
+        var workDir = Path.Combine(GetWorkRoot(), jobId.ToString());
         Directory.CreateDirectory(workDir);
         ExtractArchive(archivePath, workDir);
         return workDir;
@@ -382,7 +382,7 @@ public partial class DockerComposeRunner(
 
         if (!removeWorkDir) return;
 
-        var workDir = Path.Combine(WorkRoot, jobId.ToString());
+        var workDir = Path.Combine(GetWorkRoot(), jobId.ToString());
         try
         {
             if (Directory.Exists(workDir))
@@ -615,6 +615,17 @@ public partial class DockerComposeRunner(
 
         throw new DockerComposeTimeoutException(
             $"Student API on port {port} did not respond within {opts.Value.LabDockerHealthCheckTimeoutSeconds}s.");
+    }
+
+    private string GetWorkRoot()
+    {
+        var configured = opts.Value.LabDockerWorkRoot;
+        var root = string.IsNullOrWhiteSpace(configured)
+            ? DefaultWorkRoot
+            : Path.GetFullPath(configured);
+
+        Directory.CreateDirectory(root);
+        return root;
     }
 
     private IReadOnlyList<ReadinessProbe> GetReadinessProbes(IReadOnlyCollection<LabTestCase>? testCases)

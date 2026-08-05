@@ -75,6 +75,8 @@ Khi `httpMethod = "SOURCE"`, worker **không gọi HTTP** mà **scan source code
 | `folder-exists`     | `folder-exists:**/Controllers`                    | Có thư mục Controllers             |
 | `file-exists`       | `file-exists:**/docker-compose.yml`               | Có file docker-compose.yml         |
 | `file-contains`     | `file-contains:**/Services/*.cs:interface`        | File service dùng interface        |
+| `file-contains-any` | `file-contains-any:**/*.csproj;**/*.cs:Polly\|AddPolicyHandler` | Có ít nhất một file trong các glob chứa một trong các chuỗi |
+| `integration-signal` | `integration-signal:redis`                       | Bonus: có package/API usage rõ ràng cho integration |
 | `file-not-contains` | `file-not-contains:**/Controllers/*.cs:DbContext` | Controller không gọi thẳng DB      |
 
 **Đặc điểm SOURCE test case:**
@@ -225,6 +227,8 @@ Then add 1–3 more SOURCE cases based on what the spec explicitly requires. Use
   | folder-exists         | folder-exists:**/Controllers                     | spec requires a specific folder structure       |
   | file-exists           | file-exists:**/Dockerfile                        | spec requires a specific file to be present     |
   | file-contains         | file-contains:**/Services/*.cs:interface         | spec requires use of interfaces/DI              |
+  | file-contains-any     | file-contains-any:**/*.csproj;**/*.cs:Polly|AddPolicyHandler | spec accepts one of several package/code signals |
+  | integration-signal    | integration-signal:rabbitmq                      | bonus checks for rabbitmq, redis, opentelemetry, or resilience strong signals |
   | file-not-contains     | file-not-contains:**/Controllers/*.cs:DbContext  | spec forbids business logic or DB in a layer    |
 
 All SOURCE cases use: httpMethod:"SOURCE", expectedStatusCode:200, matchMode:"StatusOnly", expectJson:null, inputJson:null
