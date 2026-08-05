@@ -27,6 +27,7 @@ public class WorkerOptions
     public int LabApiPortRangeEnd { get; set; } = 16000;
     public int LabDbPortRangeStart { get; set; } = 14000;
     public int LabDbPortRangeEnd { get; set; } = 14999;
+    public string? LabDockerWorkRoot { get; set; }
     public int LabDockerHealthCheckTimeoutSeconds { get; set; } = 60;
     public int LabDockerHealthCheckIntervalSeconds { get; set; } = 1;
     public int LabDockerHealthCheckRequiredConsecutiveSuccesses { get; set; } = 2;
@@ -38,12 +39,12 @@ public class WorkerOptions
     public int LabDockerBuildRetryAttempts { get; set; } = 2;
     public int LabDockerBuildRetryDelaySeconds { get; set; } = 10;
     public int LabDockerDownTimeoutSeconds { get; set; } = 30;
-    public int LabDockerBuildCachePruneIntervalJobs { get; set; } = 5;
-    public string LabDockerBuildCacheKeepStorage { get; set; } = "3GB";
-    public int LabDockerBuildCacheFullPruneIntervalHours { get; set; } = 24;
+    public int LabDockerBuildCachePruneIntervalJobs { get; set; } = 20;
+    public string LabDockerBuildCacheKeepStorage { get; set; } = "12GB";
+    public int LabDockerBuildCacheFullPruneIntervalHours { get; set; } = 0;
     public bool LabDockerRemoveImagesOnCleanup { get; set; } = false;
     public int LabDockerSystemPruneIntervalHours { get; set; } = 6;
-    public double LabDockerSystemPruneReclaimableThresholdGb { get; set; } = 15;
+    public double LabDockerSystemPruneReclaimableThresholdGb { get; set; } = 30;
     public bool LabDockerSystemPruneVolumes { get; set; } = true;
     public string LabContainerMemoryLimit { get; set; } = "512m";
     public double LabContainerCpuLimit { get; set; } = 1.0;

@@ -9,7 +9,7 @@
     "elementId": "td_viewer_3",
     "elementText": "Le Hoang Long",
     "order": 1,
-    "score": 1.2
+    "score": 1
   },
   {
     "name": "TC02 - Nap form va bo loc tim kiem tren /Ticket",
@@ -21,7 +21,7 @@
     "selector": "#sl_ageGroup",
     "selectorMinCount": 1,
     "order": 2,
-    "score": 0.6
+    "score": 0.5
   },
   {
     "name": "TC03 - Hien thi lien ket xem chi tiet ve tren /Ticket",
@@ -33,7 +33,7 @@
     "selector": "a#a_1[href*='/Ticket/1']",
     "selectorMinCount": 1,
     "order": 3,
-    "score": 1.2
+    "score": 1
   },
   {
     "name": "TC04 - Dieu huong den trang chi tiet /Ticket/1",
@@ -47,7 +47,7 @@
     "selectorText": "hung.tran@gmail.com",
     "value": "2026-06-21 19:30",
     "order": 4,
-    "score": 1.2
+    "score": 1
   },
   {
     "name": "TC05 - Trang chi tiet /Ticket/1 hien thi phim va chi phi ve",
@@ -61,7 +61,7 @@
     "selectorText": "Lat Mat 7",
     "value": "180000.00",
     "order": 5,
-    "score": 1.2
+    "score": 1
   },
   {
     "name": "TC06 - Loc danh sach ve theo phim Lat Mat 7",
@@ -74,6 +74,6 @@
     "selector": "a#a_1[href*='/Ticket/1']",
     "selectorMinCount": 1,
     "order": 6,
-    "score": 0.6
+    "score": 0.5
   }
 ]

@@ -13,7 +13,7 @@
       { "genreId": 6, "genreName": "Khoa hoc", "description": "Phim nghien cuu khoa hoc, vien tuong", "movieCount": 0 }
     ],
     "order": 1,
-    "score": 0.8
+    "score": 1
   },
   {
     "name": "GET /api/filter-movies?genreId=1&minDuration=150 - loc phim hop le",
@@ -33,7 +33,7 @@
       }
     ],
     "order": 2,
-    "score": 0.8
+    "score": 1
   },
   {
     "name": "GET /api/filter-movies?genreId=1&minDuration=-150 - minDuration am -> 400",
@@ -42,7 +42,7 @@
     "input": { "genreId": 1, "minDuration": -150 },
     "expectedStatus": 400,
     "order": 3,
-    "score": 0.2
+    "score": 0.25
   },
   {
     "name": "POST /api/movies - them phim moi hop le",
@@ -59,7 +59,7 @@
       "genres": []
     },
     "order": 4,
-    "score": 0.6
+    "score": 0.75
   },
   {
     "name": "POST /api/movies - trung ten phim Lat Mat 7 -> 400",
@@ -68,7 +68,7 @@
     "input": { "title": "Lat Mat 7", "duration": 20, "basePrice": 20000.00 },
     "expectedStatus": 400,
     "order": 5,
-    "score": 0.4
+    "score": 0.5
   },
   {
     "name": "DELETE /api/movies/6 - xoa phim khong co booking",
@@ -76,7 +76,7 @@
     "urlTemplate": "/api/movies/6",
     "expectedStatus": 204,
     "order": 6,
-    "score": 0.6
+    "score": 0.75
   },
   {
     "name": "DELETE /api/movies/1 - phim dang co lich dat ve -> 400",
@@ -84,7 +84,7 @@
     "urlTemplate": "/api/movies/1",
     "expectedStatus": 400,
     "order": 7,
-    "score": 0.4
+    "score": 0.5
   },
   {
     "name": "DELETE /api/movies/99 - khong ton tai -> 404",
@@ -92,6 +92,6 @@
     "urlTemplate": "/api/movies/99",
     "expectedStatus": 404,
     "order": 8,
-    "score": 0.2
+    "score": 0.25
   }
 ]

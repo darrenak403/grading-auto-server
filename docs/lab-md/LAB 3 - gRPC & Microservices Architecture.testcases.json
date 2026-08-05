@@ -188,8 +188,8 @@
   },
   {
     "httpMethod": "SOURCE",
-    "urlTemplate": "file-contains-any:**/*.csproj:RabbitMQ.Client|MassTransit|EasyNetQ",
-    "description": "Bonus: RabbitMQ integration package is configured",
+    "urlTemplate": "integration-signal:rabbitmq",
+    "description": "Bonus: RabbitMQ integration signal is present",
     "saveTokenFrom": null,
     "headers": null,
     "inputJson": null,
@@ -200,8 +200,8 @@
   },
   {
     "httpMethod": "SOURCE",
-    "urlTemplate": "file-contains-any:**/*.csproj:StackExchange.Redis|Microsoft.Extensions.Caching.StackExchangeRedis",
-    "description": "Bonus: Redis cache package is configured",
+    "urlTemplate": "integration-signal:redis",
+    "description": "Bonus: Redis cache integration signal is present",
     "saveTokenFrom": null,
     "headers": null,
     "inputJson": null,
@@ -212,8 +212,8 @@
   },
   {
     "httpMethod": "SOURCE",
-    "urlTemplate": "file-contains-any:**/*.csproj:OpenTelemetry|OpenTelemetry.Extensions.Hosting|OpenTelemetry.Exporter",
-    "description": "Bonus: OpenTelemetry distributed tracing package is configured",
+    "urlTemplate": "integration-signal:opentelemetry",
+    "description": "Bonus: OpenTelemetry tracing integration signal is present",
     "saveTokenFrom": null,
     "headers": null,
     "inputJson": null,
@@ -224,8 +224,8 @@
   },
   {
     "httpMethod": "SOURCE",
-    "urlTemplate": "file-contains-any:**/*.csproj:Polly|Microsoft.Extensions.Http.Polly",
-    "description": "Bonus: Polly circuit breaker package is configured for gRPC clients",
+    "urlTemplate": "integration-signal:resilience",
+    "description": "Bonus: Polly or .NET resilience integration signal is present",
     "saveTokenFrom": null,
     "headers": null,
     "inputJson": null,

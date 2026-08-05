@@ -16,13 +16,82 @@ namespace GradingSystem.Worker.Services.Lab;
 ///   file-count-at-least:**/*.proto:1   — at least N files match glob
 ///   file-contains:**/Services/*.cs:IRepository     — at least one file contains text
 ///   file-contains-any:**/*.cs:AddReverseProxy|AddOcelot — at least one file contains any option
+///   integration-signal:redis        — bonus integration signal from package references or code usage
 ///   file-not-contains:**/Controllers/*.cs:DbContext — no file contains text
 ///   compose-service-exists:api-gateway — docker-compose.yml defines this service
 ///   compose-service-count-at-least:7   — docker-compose.yml defines at least N services
 /// </summary>
 public class SourceAnalyzer
 {
+    private const string IntegrationSignalFileGlob = "**/*.csproj;**/*.props;**/packages.config;**/*.cs";
+    private static readonly HashSet<string> IgnoredDirectoryNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".git",
+        ".vs",
+        "bin",
+        "obj",
+        "node_modules",
+        "packages",
+        "TestResults",
+    };
+
+    private static readonly IReadOnlyDictionary<string, string[]> IntegrationSignals =
+        new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["rabbitmq"] = new[]
+            {
+                "RabbitMQ.Client",
+                "MassTransit",
+                "MassTransit.RabbitMQ",
+                "EasyNetQ",
+                "AddMassTransit",
+                "UsingRabbitMq",
+                "UseRabbitMq",
+                "IRabbitMqBusFactoryConfigurator",
+            },
+            ["redis"] = new[]
+            {
+                "StackExchange.Redis",
+                "Microsoft.Extensions.Caching.StackExchangeRedis",
+                "NRedisStack",
+                "CSRedisCore",
+                "FreeRedis",
+                "AddStackExchangeRedisCache",
+                "IConnectionMultiplexer",
+            },
+            ["opentelemetry"] = new[]
+            {
+                "OpenTelemetry",
+                "AddOpenTelemetry",
+                "WithTracing",
+                "UseOtlpExporter",
+                "AddAspNetCoreInstrumentation",
+                "AddHttpClientInstrumentation",
+            },
+            ["resilience"] = new[]
+            {
+                "Polly",
+                "Microsoft.Extensions.Http.Polly",
+                "Microsoft.Extensions.Http.Resilience",
+                "Microsoft.Extensions.Resilience",
+                "AddPolicyHandler",
+                "AddTransientHttpErrorPolicy",
+                "WaitAndRetry",
+                "CircuitBreaker",
+                "AddStandardResilienceHandler",
+                "AddResilienceHandler",
+            },
+        };
+
+    public SourceScanContext Scan(string workDir) => new(workDir);
+
     public LabTestCaseResult Check(LabTestCase tc, string workDir, Guid jobId)
+    {
+        var source = Scan(workDir);
+        return Check(tc, source, jobId);
+    }
+
+    public LabTestCaseResult Check(LabTestCase tc, SourceScanContext source, Guid jobId)
     {
         var rule = tc.UrlTemplate?.Trim() ?? string.Empty;
         var colon = rule.IndexOf(':');
@@ -36,17 +105,18 @@ public class SourceAnalyzer
         {
             var (passed, detail) = ruleType switch
             {
-                "project-name"       => CheckProjectName(workDir, ruleArgs),
-                "project-count"      => CheckProjectCount(workDir, ruleArgs),
-                "project-count-at-least" => CheckProjectCountAtLeast(workDir, ruleArgs),
-                "folder-exists"      => CheckFolderExists(workDir, ruleArgs),
-                "file-exists"        => CheckFileExists(workDir, ruleArgs),
-                "file-count-at-least" => CheckFileCountAtLeast(workDir, ruleArgs),
-                "file-contains"      => CheckFilePattern(workDir, ruleArgs, mustContain: true),
-                "file-contains-any"  => CheckFileContainsAny(workDir, ruleArgs),
-                "file-not-contains"  => CheckFilePattern(workDir, ruleArgs, mustContain: false),
-                "compose-service-exists" => CheckComposeServiceExists(workDir, ruleArgs),
-                "compose-service-count-at-least" => CheckComposeServiceCountAtLeast(workDir, ruleArgs),
+                "project-name"       => CheckProjectName(source, ruleArgs),
+                "project-count"      => CheckProjectCount(source, ruleArgs),
+                "project-count-at-least" => CheckProjectCountAtLeast(source, ruleArgs),
+                "folder-exists"      => CheckFolderExists(source, ruleArgs),
+                "file-exists"        => CheckFileExists(source, ruleArgs),
+                "file-count-at-least" => CheckFileCountAtLeast(source, ruleArgs),
+                "file-contains"      => CheckFilePattern(source, ruleArgs, mustContain: true),
+                "file-contains-any"  => CheckFileContainsAny(source, ruleArgs),
+                "integration-signal" => CheckIntegrationSignal(source, ruleArgs),
+                "file-not-contains"  => CheckFilePattern(source, ruleArgs, mustContain: false),
+                "compose-service-exists" => CheckComposeServiceExists(source, ruleArgs),
+                "compose-service-count-at-least" => CheckComposeServiceCountAtLeast(source, ruleArgs),
                 _                    => (false, $"Unknown SOURCE rule type: '{ruleType}'")
             };
 
@@ -68,11 +138,11 @@ public class SourceAnalyzer
     }
 
     // project-name:PRN232.*.API  →  at least one .csproj whose name matches the glob
-    private static (bool, string) CheckProjectName(string workDir, string pattern)
+    private static (bool, string) CheckProjectName(SourceScanContext source, string pattern)
     {
         if (!pattern.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
             pattern += ".csproj";
-        var found = GlobFiles(workDir, $"**/{pattern}")
+        var found = source.GlobFilePaths($"**/{pattern}")
             .Select(Path.GetFileName).ToList();
         return found.Count > 0
             ? (true,  $"Found: {string.Join(", ", found)}")
@@ -80,48 +150,48 @@ public class SourceAnalyzer
     }
 
     // project-count:3  →  archive contains exactly N .csproj files (ignores macOS ._* metadata files)
-    private static (bool, string) CheckProjectCount(string workDir, string args)
+    private static (bool, string) CheckProjectCount(SourceScanContext source, string args)
     {
         if (!int.TryParse(args.Trim(), out var expected))
             return (false, $"Invalid count '{args}' — must be an integer.");
-        var files = GetProjectFileNames(workDir);
+        var files = source.ProjectFileNames;
         return files.Count == expected
             ? (true,  $"Found {files.Count} project(s): {string.Join(", ", files)}")
             : (false, $"Expected {expected} project(s), found {files.Count}: {string.Join(", ", files)}");
     }
 
-    private static (bool, string) CheckProjectCountAtLeast(string workDir, string args)
+    private static (bool, string) CheckProjectCountAtLeast(SourceScanContext source, string args)
     {
         if (!int.TryParse(args.Trim(), out var minimum))
             return (false, $"Invalid count '{args}' — must be an integer.");
 
-        var files = GetProjectFileNames(workDir);
+        var files = source.ProjectFileNames;
         return files.Count >= minimum
             ? (true, $"Found {files.Count} project(s): {string.Join(", ", files)}")
             : (false, $"Expected at least {minimum} project(s), found {files.Count}: {string.Join(", ", files)}");
     }
 
     // folder-exists:**/Controllers  →  at least one matching directory exists
-    private static (bool, string) CheckFolderExists(string workDir, string pattern)
+    private static (bool, string) CheckFolderExists(SourceScanContext source, string pattern)
     {
-        var found = GlobDirs(workDir, pattern)
-            .Select(d => Path.GetRelativePath(workDir, d)).ToList();
+        var found = source.GlobDirectoryPaths(pattern)
+            .Select(source.GetRelativePath).ToList();
         return found.Count > 0
             ? (true,  $"Found: {string.Join(", ", found)}")
             : (false, $"No folder matching '{pattern}' found.");
     }
 
     // file-exists:**/docker-compose.yml  →  at least one matching file exists
-    private static (bool, string) CheckFileExists(string workDir, string pattern)
+    private static (bool, string) CheckFileExists(SourceScanContext source, string pattern)
     {
-        var found = GlobFiles(workDir, pattern)
-            .Select(f => Path.GetRelativePath(workDir, f)).ToList();
+        var found = source.GlobFilePaths(pattern)
+            .Select(source.GetRelativePath).ToList();
         return found.Count > 0
             ? (true,  $"Found: {string.Join(", ", found)}")
             : (false, $"No file matching '{pattern}' found.");
     }
 
-    private static (bool, string) CheckFileCountAtLeast(string workDir, string args)
+    private static (bool, string) CheckFileCountAtLeast(SourceScanContext source, string args)
     {
         var sep = args.LastIndexOf(':');
         if (sep < 0)
@@ -132,8 +202,8 @@ public class SourceAnalyzer
         if (!int.TryParse(countText.Trim(), out var minimum))
             return (false, $"Invalid count '{countText}' — must be an integer.");
 
-        var found = GlobFiles(workDir, fileGlob)
-            .Select(f => Path.GetRelativePath(workDir, f))
+        var found = source.GlobFilePaths(fileGlob)
+            .Select(source.GetRelativePath)
             .ToList();
 
         return found.Count >= minimum
@@ -144,7 +214,7 @@ public class SourceAnalyzer
     // file-contains:**/Services/*.cs:IRepository
     //   mustContain=true  → passes if AT LEAST ONE matching file contains the text
     //   mustContain=false → passes if NO matching file contains the text
-    private static (bool, string) CheckFilePattern(string workDir, string args, bool mustContain)
+    private static (bool, string) CheckFilePattern(SourceScanContext source, string args, bool mustContain)
     {
         var sep = args.IndexOf(':');
         if (sep < 0)
@@ -153,13 +223,13 @@ public class SourceAnalyzer
         var fileGlob  = args[..sep];
         var searchText = args[(sep + 1)..];
 
-        var files = GlobFiles(workDir, fileGlob).ToList();
+        var files = source.GlobFilePaths(fileGlob, includeCentralPackageFiles: true);
         if (files.Count == 0)
             return (false, $"No files matching '{fileGlob}' found in archive.");
 
         var matches = files
-            .Where(f => File.ReadAllText(f).Contains(searchText, StringComparison.OrdinalIgnoreCase))
-            .Select(f => Path.GetRelativePath(workDir, f))
+            .Where(f => source.ReadAllText(f).Contains(searchText, StringComparison.OrdinalIgnoreCase))
+            .Select(source.GetRelativePath)
             .ToList();
 
         return mustContain
@@ -171,7 +241,7 @@ public class SourceAnalyzer
                 : (false, $"{matches.Count} file(s) contain '{searchText}': {string.Join(", ", matches)}");
     }
 
-    private static (bool, string) CheckFileContainsAny(string workDir, string args)
+    private static (bool, string) CheckFileContainsAny(SourceScanContext source, string args)
     {
         var sep = args.IndexOf(':');
         if (sep < 0)
@@ -184,101 +254,77 @@ public class SourceAnalyzer
         if (options.Length == 0)
             return (false, "file-contains-any requires at least one search option.");
 
-        var files = GlobFiles(workDir, fileGlob).ToList();
+        var files = source.GlobFilePaths(fileGlob, includeCentralPackageFiles: true);
         if (files.Count == 0)
             return (false, $"No files matching '{fileGlob}' found in archive.");
 
         foreach (var file in files)
         {
-            var content = File.ReadAllText(file);
+            var content = source.ReadAllText(file);
             var matched = options.FirstOrDefault(option =>
                 content.Contains(option, StringComparison.OrdinalIgnoreCase));
             if (matched is not null)
-                return (true, $"{Path.GetRelativePath(workDir, file)} contains '{matched}'.");
+                return (true, $"{source.GetRelativePath(file)} contains '{matched}'.");
         }
 
         return (false, $"None of the {files.Count} file(s) matching '{fileGlob}' contain any of: {string.Join(", ", options)}");
     }
 
-    private static (bool, string) CheckComposeServiceExists(string workDir, string serviceName)
+    private static (bool, string) CheckIntegrationSignal(SourceScanContext source, string args)
+    {
+        var integration = args.Trim();
+        if (!IntegrationSignals.TryGetValue(integration, out var signals))
+            return (false, $"Unknown integration signal '{integration}'. Supported: {string.Join(", ", IntegrationSignals.Keys)}");
+
+        var files = source.GlobFilePaths(IntegrationSignalFileGlob);
+        if (files.Count == 0)
+            return (false, $"No source/package files found for integration signal '{integration}'.");
+
+        foreach (var file in files)
+        {
+            var content = source.ReadAllText(file);
+            var matched = signals.FirstOrDefault(signal =>
+                content.Contains(signal, StringComparison.OrdinalIgnoreCase));
+            if (matched is not null)
+                return (true, $"{integration}: {source.GetRelativePath(file)} contains '{matched}'.");
+        }
+
+        return (false, $"{integration}: none of the {files.Count} source/package file(s) contain any strong signal: {string.Join(", ", signals)}");
+    }
+
+    private static (bool, string) CheckComposeServiceExists(SourceScanContext source, string serviceName)
     {
         serviceName = serviceName.Trim();
         if (string.IsNullOrWhiteSpace(serviceName))
             return (false, "compose-service-exists requires a service name.");
 
-        var services = GetComposeServices(workDir);
+        var services = source.GetComposeServices();
         return services.Contains(serviceName, StringComparer.OrdinalIgnoreCase)
             ? (true, $"Found compose service '{serviceName}'.")
             : (false, $"Compose service '{serviceName}' not found. Services: {string.Join(", ", services)}");
     }
 
-    private static (bool, string) CheckComposeServiceCountAtLeast(string workDir, string args)
+    private static (bool, string) CheckComposeServiceCountAtLeast(SourceScanContext source, string args)
     {
         if (!int.TryParse(args.Trim(), out var minimum))
             return (false, $"Invalid count '{args}' — must be an integer.");
 
-        var services = GetComposeServices(workDir);
+        var services = source.GetComposeServices();
         return services.Count >= minimum
             ? (true, $"Found {services.Count} compose service(s): {string.Join(", ", services)}")
             : (false, $"Expected at least {minimum} compose service(s), found {services.Count}: {string.Join(", ", services)}");
     }
 
-    private static List<string> GetProjectFileNames(string workDir) =>
-        Directory
-            .EnumerateFiles(workDir, "*.csproj", SearchOption.AllDirectories)
-            .Select(f => Path.GetFileName(f)!)
-            .Where(f => !f.StartsWith("._", StringComparison.Ordinal))
-            .ToList();
-
-    private static List<string> GetComposeServices(string workDir)
-    {
-        var composePath = GlobFiles(workDir, "**/docker-compose.yml").FirstOrDefault()
-            ?? GlobFiles(workDir, "**/compose.yml").FirstOrDefault();
-
-        if (composePath is null) return [];
-
-        var services = new List<string>();
-        var inServices = false;
-        var servicesIndent = -1;
-
-        foreach (var rawLine in File.ReadLines(composePath))
-        {
-            var line = rawLine.TrimEnd();
-            if (string.IsNullOrWhiteSpace(line) || line.TrimStart().StartsWith('#')) continue;
-
-            if (!inServices)
-            {
-                if (RemoveInlineComment(line).Trim() == "services:")
-                {
-                    inServices = true;
-                    servicesIndent = CountLeadingWhitespace(rawLine);
-                }
-                continue;
-            }
-
-            if (CountLeadingWhitespace(rawLine) <= servicesIndent && !string.IsNullOrWhiteSpace(rawLine))
-                break;
-
-            var match = Regex.Match(rawLine, @"^(?<indent>\s{2,}|\t+)(?<name>[a-zA-Z0-9][a-zA-Z0-9_.-]*):\s*(?:#.*)?$");
-            if (!match.Success) continue;
-
-            var indent = match.Groups["indent"].Value.Length;
-            if (indent == servicesIndent + 2 || indent == servicesIndent + 1)
-                services.Add(match.Groups["name"].Value);
-        }
-
-        return services.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-    }
-
     // --- Glob helpers ---
 
-    private static IEnumerable<string> GlobFiles(string root, string pattern) =>
-        Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
-                 .Where(f => GlobMatch(Path.GetRelativePath(root, f), pattern));
+    private static string[] SplitGlobPatterns(string pattern) =>
+        pattern
+            .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(p => !string.IsNullOrWhiteSpace(p))
+            .ToArray();
 
-    private static IEnumerable<string> GlobDirs(string root, string pattern) =>
-        Directory.EnumerateDirectories(root, "*", SearchOption.AllDirectories)
-                 .Where(d => GlobMatch(Path.GetRelativePath(root, d), pattern));
+    private static bool IsProjectFileGlob(string pattern) =>
+        pattern.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase);
 
     private static bool GlobMatch(string path, string pattern)
     {
@@ -286,7 +332,7 @@ public class SourceAnalyzer
         pattern = pattern.TrimStart('/').Replace('\\', '/');
 
         var regex = "^" + Regex.Escape(pattern)
-            .Replace(@"\*\*\/", "(.+/)?")
+            .Replace(@"\*\*/", "(.+/)?")
             .Replace(@"\*\*",   ".*")
             .Replace(@"\*",     "[^/]*")
             .Replace(@"\?",     "[^/]")
@@ -333,4 +379,163 @@ public class SourceAnalyzer
         ActualStatusCode = 0,
         ErrorMessage     = message,
     };
+
+    public sealed class SourceScanContext
+    {
+        private readonly record struct SourcePath(string AbsolutePath, string RelativePath);
+        private readonly record struct GlobCacheKey(string Pattern, bool IncludeCentralPackageFiles);
+
+        private readonly List<SourcePath> _files;
+        private readonly List<SourcePath> _directories;
+        private readonly Dictionary<GlobCacheKey, IReadOnlyList<string>> _fileGlobCache = new();
+        private readonly Dictionary<string, IReadOnlyList<string>> _directoryGlobCache = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, string> _contentCache = new(StringComparer.OrdinalIgnoreCase);
+        private IReadOnlyList<string>? _composeServices;
+
+        public SourceScanContext(string root)
+        {
+            Root = Path.GetFullPath(root);
+            (_files, _directories) = ScanTree(Root);
+            ProjectFileNames = _files
+                .Select(f => Path.GetFileName(f.AbsolutePath))
+                .Where(f => f.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
+                .Where(f => !f.StartsWith("._", StringComparison.Ordinal))
+                .ToList();
+        }
+
+        public string Root { get; }
+
+        public IReadOnlyList<string> ProjectFileNames { get; }
+
+        public IReadOnlyList<string> GlobFilePaths(
+            string pattern,
+            bool includeCentralPackageFiles = false)
+        {
+            var key = new GlobCacheKey(pattern, includeCentralPackageFiles);
+            if (_fileGlobCache.TryGetValue(key, out var cached))
+                return cached;
+
+            var patterns = SplitGlobPatterns(pattern);
+            if (includeCentralPackageFiles && patterns.Any(IsProjectFileGlob))
+                patterns = [.. patterns, "**/*.props", "**/packages.config"];
+
+            var matched = _files
+                .Where(f => patterns.Any(p => GlobMatch(f.RelativePath, p)))
+                .Select(f => f.AbsolutePath)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            _fileGlobCache[key] = matched;
+            return matched;
+        }
+
+        public IReadOnlyList<string> GlobDirectoryPaths(string pattern)
+        {
+            if (_directoryGlobCache.TryGetValue(pattern, out var cached))
+                return cached;
+
+            var patterns = SplitGlobPatterns(pattern);
+            var matched = _directories
+                .Where(d => patterns.Any(p => GlobMatch(d.RelativePath, p)))
+                .Select(d => d.AbsolutePath)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            _directoryGlobCache[pattern] = matched;
+            return matched;
+        }
+
+        public string ReadAllText(string path)
+        {
+            if (_contentCache.TryGetValue(path, out var cached))
+                return cached;
+
+            var content = File.ReadAllText(path);
+            _contentCache[path] = content;
+            return content;
+        }
+
+        public string GetRelativePath(string path) => Path.GetRelativePath(Root, path);
+
+        public IReadOnlyList<string> GetComposeServices()
+        {
+            if (_composeServices is not null)
+                return _composeServices;
+
+            var composePath = GlobFilePaths("**/docker-compose.yml").FirstOrDefault()
+                ?? GlobFilePaths("**/compose.yml").FirstOrDefault();
+
+            _composeServices = composePath is null ? [] : ParseComposeServices(ReadAllText(composePath));
+            return _composeServices;
+        }
+
+        private static (List<SourcePath> Files, List<SourcePath> Directories) ScanTree(string root)
+        {
+            var files = new List<SourcePath>();
+            var directories = new List<SourcePath>();
+            var pending = new Stack<string>();
+            pending.Push(root);
+
+            while (pending.Count > 0)
+            {
+                var current = pending.Pop();
+
+                foreach (var directory in Directory.EnumerateDirectories(current))
+                {
+                    if (IgnoredDirectoryNames.Contains(Path.GetFileName(directory)))
+                        continue;
+
+                    var fullPath = Path.GetFullPath(directory);
+                    directories.Add(new SourcePath(fullPath, NormalizeRelativePath(root, fullPath)));
+                    pending.Push(fullPath);
+                }
+
+                foreach (var file in Directory.EnumerateFiles(current))
+                {
+                    var fullPath = Path.GetFullPath(file);
+                    files.Add(new SourcePath(fullPath, NormalizeRelativePath(root, fullPath)));
+                }
+            }
+
+            return (files, directories);
+        }
+
+        private static IReadOnlyList<string> ParseComposeServices(string composeContent)
+        {
+            var services = new List<string>();
+            var inServices = false;
+            var servicesIndent = -1;
+
+            foreach (var rawLine in composeContent.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
+            {
+                var line = rawLine.TrimEnd();
+                if (string.IsNullOrWhiteSpace(line) || line.TrimStart().StartsWith('#')) continue;
+
+                if (!inServices)
+                {
+                    if (RemoveInlineComment(line).Trim() == "services:")
+                    {
+                        inServices = true;
+                        servicesIndent = CountLeadingWhitespace(rawLine);
+                    }
+                    continue;
+                }
+
+                if (CountLeadingWhitespace(rawLine) <= servicesIndent && !string.IsNullOrWhiteSpace(rawLine))
+                    break;
+
+                var match = Regex.Match(rawLine, @"^(?<indent>\s{2,}|\t+)(?<name>[a-zA-Z0-9][a-zA-Z0-9_.-]*):\s*(?:#.*)?$");
+                if (!match.Success) continue;
+
+                var indent = match.Groups["indent"].Value.Length;
+                if (indent == servicesIndent + 2 || indent == servicesIndent + 1)
+                    services.Add(match.Groups["name"].Value);
+            }
+
+            return services.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        }
+
+        private static string NormalizeRelativePath(string root, string path) =>
+            Path.GetRelativePath(root, path).Replace('\\', '/');
+    }
 }

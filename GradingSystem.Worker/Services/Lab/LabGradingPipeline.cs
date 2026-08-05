@@ -84,12 +84,13 @@ public class LabGradingPipeline(
         try
         {
             // Phase 1: Extract archive — SOURCE checks need this, always runs first
-            workDir = DockerComposeRunner.Extract(submission.FilePath, jobId);
+            workDir = docker.Extract(submission.FilePath, jobId);
 
             // Phase 2: SOURCE checks — file-system only, no Docker needed
+            var sourceContext = sourceAnalyzer.Scan(workDir);
             foreach (var tc in sourceTests)
             {
-                var r = sourceAnalyzer.Check(tc, workDir, jobId);
+                var r = sourceAnalyzer.Check(tc, sourceContext, jobId);
                 allResults.Add(r);
                 logger.LogInformation("Job {JobId} SOURCE tc {TcId}: passed={Passed} — {Detail}",
                     jobId, tc.Id, r.Passed, r.ActualResponse);
