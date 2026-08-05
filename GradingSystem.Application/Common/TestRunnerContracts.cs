@@ -9,7 +9,8 @@ public class ExpectJson
     public string? Selector { get; set; }
     public string? SelectorText { get; set; }
     public int? SelectorMinCount { get; set; }
-    // Q1: exact JSON body comparison via newman
+    // Q1/Q2: JSON body subset comparison (all expected keys/values must be present in the actual
+    // response; extra actual fields are tolerated so correct-but-richer bodies don't fail)
     public System.Text.Json.JsonElement? Body { get; set; }
     // Q2: check element existence/text by HTML id attribute
     public string? ElementId { get; set; }

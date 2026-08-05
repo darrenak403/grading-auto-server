@@ -1,0 +1,93 @@
+
+<!-- saved from url=(0022)http://localhost:5190/ -->
+<html><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+
+</head><body><div class="cinema-wrap">
+    <h2 style="margin-top: 0; margin-bottom: 20px;">Cinema Ticket Booking Management</h2>
+
+    <!-- Form tìm kiếm nâng cao -->
+    <form method="get" action="http://localhost:5190/Ticket" class="filter-section">
+        <div class="filter-item">
+            <label>Filter by Movie:</label>
+            <select name="movieId" id="sl_movies">
+                <option value="0" id="op_0">All movies</option>
+                        <option value="1" id="op_1">Lat Mat 7</option>
+                        <option value="2" id="op_2">Ngay Xua Co Mot Chuyen Tinh</option>
+                        <option value="3" id="op_3">Biet Doi Anh Hung</option>
+                        <option value="4" id="op_4">Tham Tu Conan</option>
+                        <option value="5" id="op_5">Quy Cau</option>
+            </select>
+        </div>
+
+        <div class="filter-item">
+            <label>Viewer Age Group:</label>
+            <select name="ageGroup" id="sl_ageGroup">
+                <option value="All viewers" selected="selected">All viewers</option>
+                <option value="Minor ( &lt; 18 )">Minor ( &lt; 18 )</option>
+                <option value="Adult ( &gt;= 18 )">Adult ( &gt;= 18 )</option>
+            </select>
+        </div>
+
+        <button type="submit" id="bt_search" class="btn-submit">Search</button>
+    </form>
+
+    <!-- Bảng hiển thị kết quả -->
+    <table class="ticket-table">
+        <thead>
+            <tr>
+                <th style="width: 120px;">Ticket ID</th>
+                <th style="width: 250px;">Viewer Name</th>
+                <th style="width: 230px;">Booking Date</th>
+                <th style="width: 130px;">Viewer Age</th>
+                <th style="width: 120px;">Action</th>
+            </tr>
+        </thead>
+        <tbody>
+                <tr>
+                    <td id="td_id_1">1</td>
+                    <td id="td_viewer_1">Tran Van Hung</td>
+                    <td id="td_bookingDate_1">2026-06-20 14:00</td>
+                    <td id="td_age_1">20</td>
+                    <td>
+                        <a href="http://localhost:5190/Ticket/1" id="a_1" class="btn-action">View Details</a>
+                    </td>
+                </tr>
+                <tr>
+                    <td id="td_id_2">2</td>
+                    <td id="td_viewer_2">Nguyen Thi Mai</td>
+                    <td id="td_bookingDate_2">2026-06-20 15:30</td>
+                    <td id="td_age_2">17</td>
+                    <td>
+                        <a href="http://localhost:5190/Ticket/2" id="a_2" class="btn-action">View Details</a>
+                    </td>
+                </tr>
+                <tr>
+                    <td id="td_id_3">3</td>
+                    <td id="td_viewer_3">Le Hoang Long</td>
+                    <td id="td_bookingDate_3">2026-06-21 09:00</td>
+                    <td id="td_age_3">25</td>
+                    <td>
+                        <a href="http://localhost:5190/Ticket/3" id="a_3" class="btn-action">View Details</a>
+                    </td>
+                </tr>
+                <tr>
+                    <td id="td_id_4">4</td>
+                    <td id="td_viewer_4">Pham Hong Nhung</td>
+                    <td id="td_bookingDate_4">2026-06-21 10:15</td>
+                    <td id="td_age_4">15</td>
+                    <td>
+                        <a href="http://localhost:5190/Ticket/4" id="a_4" class="btn-action">View Details</a>
+                    </td>
+                </tr>
+                <tr>
+                    <td id="td_id_5">5</td>
+                    <td id="td_viewer_5">Vu Minh Tri</td>
+                    <td id="td_bookingDate_5">2026-06-22 08:00</td>
+                    <td id="td_age_5">30</td>
+                    <td>
+                        <a href="http://localhost:5190/Ticket/5" id="a_5" class="btn-action">View Details</a>
+                    </td>
+                </tr>
+        </tbody>
+    </table>
+</div></body></html>

@@ -1,0 +1,87 @@
+
+<!-- saved from url=(0022)http://localhost:5190/ -->
+<html><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+
+</head><body><div class="cinema-container">
+    <h2 style="margin-top: 0; margin-bottom: 20px;">Cinema Movie Catalog Management</h2>
+
+    <!-- Form tìm kiếm nâng cao -->
+    <form method="get" action="http://localhost:5190/Movie" class="filter-section">
+        <div class="filter-item">
+            <label>Genre Category:</label>
+            <select name="genreId" id="sl_genres">
+                <option value="0" id="op_0">All genres</option>
+                        <option value="1" id="op_1">Hanh dong</option>
+                        <option value="2" id="op_2">Kinh di</option>
+                        <option value="3" id="op_3">Hoat hinh</option>
+                        <option value="4" id="op_4">Hai huoc</option>
+                        <option value="5" id="op_5">Tinh cam</option>
+            </select>
+        </div>
+
+        <div class="filter-item">
+            <label>Price Segment:</label>
+            <select name="priceSegment" id="sl_priceSegment">
+                <option value="All prices" selected="selected">All prices</option>
+                <option value="Budget ( &lt; 90K )">Budget ( &lt; 90K )</option>
+                <option value="Premium ( &gt;= 90K )">Premium ( &gt;= 90K )</option>
+            </select>
+        </div>
+
+        <button type="submit" id="bt_search" class="btn-submit">Search</button>
+    </form>
+
+    <!-- Bảng kết quả -->
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th style="width: 280px;">Movie Title</th>
+                <th style="width: 150px;">Duration (mins)</th>
+                <th style="width: 150px;">Base Price</th>
+                <th style="width: 150px;">Action</th>
+            </tr>
+        </thead>
+        <tbody>
+                <tr>
+                    <td id="td_title_1">Lat Mat 7</td>
+                    <td id="td_duration_1">120 mins</td>
+                    <td id="td_price_1">90000.00</td>
+                    <td>
+                        <a href="http://localhost:5190/Movie/Analyze/1" id="a_1" class="btn-action">Analyze Movie</a>
+                    </td>
+                </tr>
+                <tr>
+                    <td id="td_title_2">Ngay Xua Co Mot Chuyen Tinh</td>
+                    <td id="td_duration_2">110 mins</td>
+                    <td id="td_price_2">85000.00</td>
+                    <td>
+                        <a href="http://localhost:5190/Movie/Analyze/2" id="a_2" class="btn-action">Analyze Movie</a>
+                    </td>
+                </tr>
+                <tr>
+                    <td id="td_title_3">Biet Doi Anh Hung</td>
+                    <td id="td_duration_3">150 mins</td>
+                    <td id="td_price_3">120000.00</td>
+                    <td>
+                        <a href="http://localhost:5190/Movie/Analyze/3" id="a_3" class="btn-action">Analyze Movie</a>
+                    </td>
+                </tr>
+                <tr>
+                    <td id="td_title_4">Tham Tu Conan</td>
+                    <td id="td_duration_4">105 mins</td>
+                    <td id="td_price_4">80000.00</td>
+                    <td>
+                        <a href="http://localhost:5190/Movie/Analyze/4" id="a_4" class="btn-action">Analyze Movie</a>
+                    </td>
+                </tr>
+                <tr>
+                    <td id="td_title_5">Quy Cau</td>
+                    <td id="td_duration_5">95 mins</td>
+                    <td id="td_price_5">95000.00</td>
+                    <td>
+                        <a href="http://localhost:5190/Movie/Analyze/5" id="a_5" class="btn-action">Analyze Movie</a>
+                    </td>
+                </tr>
+        </tbody>
+    </table>
+</div></body></html>

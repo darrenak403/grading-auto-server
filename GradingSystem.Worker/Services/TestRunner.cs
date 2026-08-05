@@ -47,9 +47,11 @@ public class TestRunner(
 
             List<TestCaseResult> details;
 
-            if (app.GivenUrlInvalid)
+            if (app.GivenUrlInvalid || app.NotSubmitted)
             {
-                // Student used wrong GivenApiBaseUrl → zero score for all test cases
+                // Student used wrong GivenApiBaseUrl, or this question's folder was missing from
+                // the artifact entirely → zero score for all test cases
+                var failReason = app.GivenUrlInvalid ? app.GivenUrlInvalidReason : app.NotSubmittedReason;
                 details = testCases.Select(tc => new TestCaseResult
                 {
                     TestCaseId = tc.Id,
@@ -58,7 +60,7 @@ public class TestRunner(
                     HttpMethod = tc.HttpMethod,
                     Url = tc.UrlTemplate,
                     ActualStatus = 0,
-                    FailReason = app.GivenUrlInvalidReason,
+                    FailReason = failReason,
                 }).ToList();
             }
             else if (question.Type == QuestionType.Api)
@@ -253,14 +255,15 @@ public class TestRunner(
 
         var expect = DeserializeExpect(tc.ExpectJson);
 
-        string? failReason = EvaluateHttp(expect, actualStatus, body, isJson, isHtml);
+        var (failReason, scoreRatio) = EvaluateHttp(expect, actualStatus, body, isJson, isHtml);
         bool pass = failReason == null;
+        var awardedScore = scoreRatio >= 1m ? tc.Score : Math.Round(tc.Score * scoreRatio, 2);
 
         return new TestCaseResult
         {
             TestCaseId = tc.Id,
             Pass = pass,
-            AwardedScore = pass ? tc.Score : 0,
+            AwardedScore = awardedScore,
             HttpMethod = tc.HttpMethod,
             Url = url,
             ActualStatus = actualStatus,
@@ -269,42 +272,45 @@ public class TestRunner(
         };
     }
 
-    private static string? EvaluateHttp(ExpectJson expect, int actualStatus, string body, bool isJson, bool isHtml)
+    // Status/shape checks (status code, content-type, IsArray, Fields, HTML assertions) remain
+    // all-or-nothing gates — a mismatch there means the wrong endpoint/shape was hit entirely.
+    // A JSON Body mismatch, however, is graded proportionally: correct status + a partially-off
+    // body should still earn partial credit rather than losing the whole test case's points.
+    private static (string? FailReason, decimal ScoreRatio) EvaluateHttp(
+        ExpectJson expect, int actualStatus, string body, bool isJson, bool isHtml)
     {
         if (expect.Status != null && actualStatus != expect.Status)
-            return $"Expected status {expect.Status}, got {actualStatus}";
+            return ($"Expected status {expect.Status}, got {actualStatus}", 0m);
 
-        if (expect.Body.HasValue
+        bool expectsBody = expect.Body.HasValue
             && expect.Body.Value.ValueKind != JsonValueKind.Undefined
-            && expect.Body.Value.ValueKind != JsonValueKind.Null)
-        {
-            if (!isJson)
-                return "Expected JSON body but response Content-Type is not application/json";
+            && expect.Body.Value.ValueKind != JsonValueKind.Null;
 
-            JsonNode? actual;
-            JsonNode? expected;
-            try
-            {
-                actual = JsonNode.Parse(body);
-                expected = JsonNode.Parse(expect.Body.Value.GetRawText());
-            }
-            catch { return "Response is not valid JSON"; }
+        if (expectsBody && !isJson)
+            return ("Expected JSON body but response Content-Type is not application/json", 0m);
 
-            if (!JsonNode.DeepEquals(actual, expected))
-                return "Response body does not match expected body";
-        }
+        decimal scoreRatio = 1m;
+        string? note = null;
 
         if (isJson)
         {
             JsonElement root;
             try { root = JsonDocument.Parse(body).RootElement; }
-            catch { return "Response is not valid JSON"; }
+            catch { return ("Response is not valid JSON", 0m); }
+
+            if (expectsBody)
+            {
+                var (matched, total) = JsonSubsetScore(root, expect.Body!.Value);
+                scoreRatio = total == 0 ? 1m : (decimal)matched / total;
+                if (scoreRatio < 1m)
+                    note = $"Response body partially matches expected body ({matched}/{total} fields correct)";
+            }
 
             if (expect.IsArray != null)
             {
                 bool actualIsArray = root.ValueKind == JsonValueKind.Array;
                 if (actualIsArray != expect.IsArray)
-                    return $"Expected isArray={expect.IsArray}, got {(actualIsArray ? "array" : "object")}";
+                    return ($"Expected isArray={expect.IsArray}, got {(actualIsArray ? "array" : "object")}", 0m);
             }
 
             if (expect.Fields != null)
@@ -312,7 +318,7 @@ public class TestRunner(
                 var target = root.ValueKind == JsonValueKind.Array ? root[0] : root;
                 var missing = expect.Fields.Where(f => !target.TryGetProperty(f, out _)).ToList();
                 if (missing.Count > 0)
-                    return $"Missing fields: {string.Join(", ", missing)}";
+                    return ($"Missing fields: {string.Join(", ", missing)}", 0m);
             }
         }
 
@@ -322,18 +328,18 @@ public class TestRunner(
             doc.LoadHtml(body);
 
             if (expect.Value != null && !body.Contains(expect.Value, StringComparison.OrdinalIgnoreCase))
-                return $"Value '{expect.Value}' not found in response";
+                return ($"Value '{expect.Value}' not found in response", 0m);
 
             // id-based element check (new, replaces/supplements selector)
             if (expect.ElementId != null)
             {
                 var node = doc.GetElementbyId(expect.ElementId);
                 if (node == null)
-                    return $"Element with id='{expect.ElementId}' not found";
+                    return ($"Element with id='{expect.ElementId}' not found", 0m);
 
                 if (expect.ElementText != null
                     && !node.InnerText.Contains(expect.ElementText, StringComparison.OrdinalIgnoreCase))
-                    return $"Element id='{expect.ElementId}' does not contain text '{expect.ElementText}'";
+                    return ($"Element id='{expect.ElementId}' does not contain text '{expect.ElementText}'", 0m);
             }
 
             if (expect.Selector != null)
@@ -346,23 +352,23 @@ public class TestRunner(
                 if (expect.SelectorMinCount != null)
                 {
                     if (nodes == null || nodes.Count < expect.SelectorMinCount)
-                        return $"Selector '{expect.Selector}' matched {nodes?.Count ?? 0}, expected >= {expect.SelectorMinCount}";
+                        return ($"Selector '{expect.Selector}' matched {nodes?.Count ?? 0}, expected >= {expect.SelectorMinCount}", 0m);
                 }
                 else if (nodes == null || nodes.Count == 0)
                 {
-                    return $"Selector '{expect.Selector}' not found";
+                    return ($"Selector '{expect.Selector}' not found", 0m);
                 }
 
                 if (expect.SelectorText != null)
                 {
                     var node = doc.DocumentNode.SelectSingleNode(xpath);
                     if (node?.InnerText.Contains(expect.SelectorText, StringComparison.OrdinalIgnoreCase) != true)
-                        return $"SelectorText '{expect.SelectorText}' not found in element";
+                        return ($"SelectorText '{expect.SelectorText}' not found in element", 0m);
                 }
             }
         }
 
-        return null;
+        return (note, scoreRatio);
     }
 
     // ── Q2: Playwright runner ──
@@ -467,15 +473,22 @@ public class TestRunner(
         }
 
         string? failReason = null;
+        decimal scoreRatio = 1m;
 
         if (expect.Status != null && actualStatus != expect.Status)
+        {
             failReason = $"Expected status {expect.Status}, got {actualStatus}";
+            scoreRatio = 0m;
+        }
 
         if (failReason == null && page != null)
+        {
             failReason = await EvaluatePlaywrightAsync(expect, page);
+            if (failReason != null) scoreRatio = 0m;
+        }
 
         if (failReason == null && page == null && !string.IsNullOrEmpty(body))
-            failReason = EvaluateJsonBody(expect, body);
+            (failReason, scoreRatio) = EvaluateJsonBody(expect, body);
 
         if (!string.IsNullOrEmpty(body))
             ExtractVariables(body, expect.Extract, context);
@@ -494,11 +507,12 @@ public class TestRunner(
         }
 
         bool pass = failReason == null;
+        var awardedScore = scoreRatio >= 1m ? tc.Score : Math.Round(tc.Score * scoreRatio, 2);
         return new TestCaseResult
         {
             TestCaseId      = tc.Id,
             Pass            = pass,
-            AwardedScore    = pass ? tc.Score : 0,
+            AwardedScore    = awardedScore,
             HttpMethod      = tc.HttpMethod,
             Url             = url,
             ActualStatus    = actualStatus,
@@ -553,17 +567,32 @@ public class TestRunner(
         return null;
     }
 
-    private static string? EvaluateJsonBody(ExpectJson expect, string body)
+    private static (string? FailReason, decimal ScoreRatio) EvaluateJsonBody(ExpectJson expect, string body)
     {
         JsonElement root;
         try { root = JsonDocument.Parse(body).RootElement; }
-        catch { return "Response is not valid JSON"; }
+        catch { return ("Response is not valid JSON", 0m); }
+
+        bool expectsBody = expect.Body.HasValue
+            && expect.Body.Value.ValueKind != JsonValueKind.Undefined
+            && expect.Body.Value.ValueKind != JsonValueKind.Null;
+
+        decimal scoreRatio = 1m;
+        string? note = null;
+
+        if (expectsBody)
+        {
+            var (matched, total) = JsonSubsetScore(root, expect.Body!.Value);
+            scoreRatio = total == 0 ? 1m : (decimal)matched / total;
+            if (scoreRatio < 1m)
+                note = $"Response body partially matches expected body ({matched}/{total} fields correct)";
+        }
 
         if (expect.IsArray != null)
         {
             bool actualIsArray = root.ValueKind == JsonValueKind.Array;
             if (actualIsArray != expect.IsArray)
-                return $"Expected isArray={expect.IsArray}, got {(actualIsArray ? "array" : "object")}";
+                return ($"Expected isArray={expect.IsArray}, got {(actualIsArray ? "array" : "object")}", 0m);
         }
 
         if (expect.Fields != null)
@@ -571,11 +600,72 @@ public class TestRunner(
             var target = root.ValueKind == JsonValueKind.Array ? root[0] : root;
             var missing = expect.Fields.Where(f => !target.TryGetProperty(f, out _)).ToList();
             if (missing.Count > 0)
-                return $"Missing fields: {string.Join(", ", missing)}";
+                return ($"Missing fields: {string.Join(", ", missing)}", 0m);
         }
 
-        return null;
+        return (note, scoreRatio);
     }
+
+    // Counts how many of the leaf values in `expected` are present with a matching value
+    // (recursively) somewhere in `actual`; `total` is the number of leaves in `expected`. Used to
+    // award partial credit for a body that's mostly-but-not-exactly right, instead of an
+    // all-or-nothing match: a correct HTTP status with a slightly-off body should cost points only
+    // for the mismatched parts, not the whole test case. Extra keys in `actual` are tolerated.
+    // Arrays are matched positionally (same index compared recursively); a missing/extra-length
+    // array counts every expected element in that array as unmatched rather than failing outright.
+    private static (int Matched, int Total) JsonSubsetScore(JsonElement actual, JsonElement expected)
+    {
+        switch (expected.ValueKind)
+        {
+            case JsonValueKind.Object:
+                if (actual.ValueKind != JsonValueKind.Object) return (0, CountLeaves(expected));
+                int matched = 0, total = 0;
+                foreach (var prop in expected.EnumerateObject())
+                {
+                    if (actual.TryGetProperty(prop.Name, out var actualProp))
+                    {
+                        var (m, t) = JsonSubsetScore(actualProp, prop.Value);
+                        matched += m;
+                        total += t;
+                    }
+                    else
+                    {
+                        total += CountLeaves(prop.Value);
+                    }
+                }
+                return (matched, total);
+
+            case JsonValueKind.Array:
+                if (actual.ValueKind != JsonValueKind.Array) return (0, CountLeaves(expected));
+                var expectedItems = expected.EnumerateArray().ToList();
+                var actualItems = actual.EnumerateArray().ToList();
+                int arrMatched = 0, arrTotal = 0;
+                for (int i = 0; i < expectedItems.Count; i++)
+                {
+                    if (i < actualItems.Count)
+                    {
+                        var (m, t) = JsonSubsetScore(actualItems[i], expectedItems[i]);
+                        arrMatched += m;
+                        arrTotal += t;
+                    }
+                    else
+                    {
+                        arrTotal += CountLeaves(expectedItems[i]);
+                    }
+                }
+                return (arrMatched, arrTotal);
+
+            default:
+                return (actual.ToString() == expected.ToString() ? 1 : 0, 1);
+        }
+    }
+
+    private static int CountLeaves(JsonElement expected) => expected.ValueKind switch
+    {
+        JsonValueKind.Object => expected.EnumerateObject().Sum(p => CountLeaves(p.Value)),
+        JsonValueKind.Array  => expected.EnumerateArray().Sum(CountLeaves),
+        _ => 1,
+    };
 
     private static string InterpolateVariables(string template, Dictionary<string, string> ctx)
     {
