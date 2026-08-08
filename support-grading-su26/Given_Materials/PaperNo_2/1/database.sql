@@ -1,251 +1,126 @@
 -- 1. Tao co so du lieu
-
-CREATE DATABASE PRN232_PE_SU26_11;
-
+CREATE DATABASE PRN232_PE_SU26_13;
 GO
 
-
-
-USE PRN232_PE_SU26_11;
-
+USE PRN232_PE_SU26_13;
 GO
 
-
-
--- 2. Bang The loai phim 
-
-CREATE TABLE Genres (
-
-    GenreID INT IDENTITY PRIMARY KEY,
-
-    GenreName NVARCHAR(100), -- VD: Hanh dong, Kinh di, Hoat hinh
-
-    Description NVARCHAR(250)
-
-);
-
-
-
--- 3. Bang Phim 
-
-CREATE TABLE Movies (
-
-    MovieID INT IDENTITY PRIMARY KEY,
-
-    Title NVARCHAR(100),
-
-    Duration INT, -- Thoi luong (phut)
-
-    BasePrice DECIMAL(10,2) -- Gia ve goc
-
-);
-
-
-
--- 4. Bang Khan gia 
-
-CREATE TABLE Viewers (
-
-    ViewerID INT IDENTITY PRIMARY KEY,
-
-    FullName NVARCHAR(100),
-
-    Email NVARCHAR(100),
-
-    Age INT
-
-);
-
-
-
--- 5. Bang Quat do an kem 
-
-CREATE TABLE Combos (
-
-    ComboID INT IDENTITY PRIMARY KEY,
-
-    ComboName NVARCHAR(100), -- VD: Bap rang bo, Nuoc ngot
-
+-- 2. Bang Goi tap 
+CREATE TABLE MembershipPackages (
+    PackageID INT IDENTITY PRIMARY KEY,
+    PackageName NVARCHAR(100), -- VD: Goi Thang, Goi Nam, Goi VIP
     Price DECIMAL(10,2)
-
 );
 
+-- 3. Bang Hoi vien 
+CREATE TABLE Members (
+    MemberID INT IDENTITY PRIMARY KEY,
+    FullName NVARCHAR(100),
+    PackageID INT FOREIGN KEY REFERENCES MembershipPackages(PackageID),
+    JoinDate DATE
+);
 
+-- 4. Bang Huan luyen vien 
+CREATE TABLE Trainers (
+    TrainerID INT IDENTITY PRIMARY KEY,
+    TrainerName NVARCHAR(100),
+    Email NVARCHAR(100),
+    ExperienceYears INT
+);
 
--- 6. Bang Ve xem phim 
+-- 5. Bang Chuyen mon/Chung chi 
+CREATE TABLE Specializations (
+    SpecID INT IDENTITY PRIMARY KEY,
+    SpecName NVARCHAR(100), -- VD: Yoga, Cardio, The hinh, Chinh dang
+    Description NVARCHAR(250)
+);
 
-CREATE TABLE Tickets (
-
-    TicketID INT IDENTITY PRIMARY KEY,
-
-    ViewerID INT FOREIGN KEY REFERENCES Viewers(ViewerID),
-
+-- 6. Bang Lich hen tap 
+CREATE TABLE Bookings (
+    BookingID INT IDENTITY PRIMARY KEY,
+    TrainerID INT FOREIGN KEY REFERENCES Trainers(TrainerID),
     BookingDate DATETIME,
-
-    ShowTime DATETIME
-
+    SessionTime DATETIME
 );
 
-
-
--- 7. Bang Chi tiet ve - phim (n-n giua Ticket va Movie)
-
-CREATE TABLE TicketDetails (
-
-    TicketID INT,
-
-    MovieID INT,
-
-    SeatNumber NVARCHAR(10), -- So ghe: A1, B2...
-
-    Quantity INT,
-
-    PRIMARY KEY (TicketID, MovieID),
-
-    FOREIGN KEY (TicketID) REFERENCES Tickets(TicketID),
-
-    FOREIGN KEY (MovieID) REFERENCES Movies(MovieID)
-
+-- 7. Bang Chi tiet lich hen - Hoi vien (n-n giua Booking va Member)
+CREATE TABLE BookingDetails (
+    BookingID INT,
+    MemberID INT,
+    DurationMinutes INT, -- Thoi gian tap (phut)
+    Status NVARCHAR(50), -- VD: Da tap, Da huy, Cho mien
+    PRIMARY KEY (BookingID, MemberID),
+    FOREIGN KEY (BookingID) REFERENCES Bookings(BookingID),
+    FOREIGN KEY (MemberID) REFERENCES Members(MemberID)
 );
 
-
-
--- 8. Bang Chi tiet the loai cua phim (n-n giua Movie va Genre)
-
-CREATE TABLE MovieGenres (
-
-    MovieID INT,
-
-    GenreID INT,
-
-    PRIMARY KEY (MovieID, GenreID),
-
-    FOREIGN KEY (MovieID) REFERENCES Movies(MovieID),
-
-    FOREIGN KEY (GenreID) REFERENCES Genres(GenreID)
-
+-- 8. Bang Chuyen mon cua Huan luyen vien (n-n giua Trainer va Specialization)
+CREATE TABLE TrainerSpecs (
+    TrainerID INT,
+    SpecID INT,
+    PRIMARY KEY (TrainerID, SpecID),
+    FOREIGN KEY (TrainerID) REFERENCES Trainers(TrainerID),
+    FOREIGN KEY (SpecID) REFERENCES Specializations(SpecID)
 );
-
-
 
 -- =============================================
-
--- DU LIEU MAU
-
+-- DU LIEU MAU 
 -- =============================================
 
-
-
--- Insert cho Genres (6 ban ghi)
-
-INSERT INTO Genres (GenreName, Description) VALUES 
-
-(N'Hanh dong', N'Phim co nhieu canh duoi bat, danh nhau gay can'), 
-
-(N'Kinh di', N'Phim co yeu to ma mi, giat gan, dang so'), 
-
-(N'Hoat hinh', N'Phim danh cho thieu nhi va gia dinh'),
-
-(N'Hai huoc', N'Phim mang lai tieng cuoi va giai tri'),
-
-(N'Tinh cam', N'Phim tap trung vao cau chuyen tinh yeu'),
-
-(N'Khoa hoc', N'Phim nghien cuu khoa hoc, vien tuong');
-
-
-
--- Insert cho Movies (6 ban ghi)
-
-INSERT INTO Movies (Title, Duration, BasePrice) VALUES 
-
-(N'Lat Mat 7', 120, 90000.00), 
-
-(N'Ngay Xua Co Mot Chuyen Tinh', 110, 85000.00),
-
-(N'Biet Doi Anh Hung', 150, 120000.00), 
-
-(N'Tham Tu Connan', 105, 80000.00),
-
-(N'Quy Cau', 95, 95000.00),
-
-(N'Pham Nhan Tu Tien', 90, 90000.00);
-
-
-
--- Insert cho Viewers (5 ban ghi)
-
-INSERT INTO Viewers (FullName, Email, Age) VALUES 
-
-(N'Nguyen Ngoc Hoan', N'hoan.nguyen@gmail.com', 20),
-
-(N'Tran Thi Mai', N'mai.tran@gmail.com', 17),
-
-(N'Le Hoang Long', N'long.le@gmail.com', 25),
-
-(N'Pham Hong Nhung', N'nhung.pham@gmail.com', 15),
-
-(N'Vu Minh Tri', N'tri.vu@gmail.com', 30);
-
-
-
--- Insert cho Combos (5 ban ghi)
-
-INSERT INTO Combos (ComboName, Price) VALUES 
-
-(N'Bap Rang Bo Single', 45000.00), 
-
-(N'Nuoc Ngot Lon', 30000.00), 
-
-(N'Combo Doi Bap Nuoc', 95000.00), 
-
-(N'Kho Ga Xe Cay', 35000.00),
-
-(N'Xuc Xich Nuong', 25000.00);
-
-
-
--- Insert cho Tickets (5 ban ghi)
-
-INSERT INTO Tickets (ViewerID, BookingDate, ShowTime) VALUES 
-
-(1, '2026-06-20 14:00:00', '2026-06-21 19:30:00'),
-
-(2, '2026-06-20 15:30:00', '2026-06-21 21:00:00'),
-
-(3, '2026-06-21 09:00:00', '2026-06-22 18:00:00'),
-
-(4, '2026-06-21 10:15:00', '2026-06-22 14:00:00'),
-
-(5, '2026-06-22 08:00:00', '2026-06-22 20:30:00');
-
-
-
--- Insert cho TicketDetails (5 ban ghi)
-
-INSERT INTO TicketDetails (TicketID, MovieID, SeatNumber, Quantity) VALUES 
-
-(1, 1, N'H12', 2), 
-
-(2, 2, N'A05', 1), 
-
-(3, 3, N'F09', 3), 
-
-(4, 4, N'B01', 1), 
-
-(5, 5, N'G11', 2);
-
-
-
--- Insert cho MovieGenres (6 ban ghi - n-n)
-
-INSERT INTO MovieGenres (MovieID, GenreID) VALUES 
-
-(1, 1), (1, 4), -- Lat Mat 7: Vua Hanh dong vua Hai huoc
-
-(2, 5),         -- Ngay Xua Co Mot Chuyen Tinh: Tinh cam
-
-(3, 1),         -- Biet Doi Anh Hung: Hanh dong
-
-(4, 3), (4, 4), -- Connan: Hoat hinh, Hai huoc
-
-(5, 2);         -- Quy Cau: Kinh di
+-- Insert cho MembershipPackages (5 ban ghi)
+INSERT INTO MembershipPackages (PackageName, Price) VALUES 
+(N'Goi Thang Co Ban', 300000.00), 
+(N'Goi Binh Minh', 450000.00), 
+(N'Goi Chuyen Nghiep', 800000.00),
+(N'Goi Gia Dinh', 1500000.00),
+(N'Goi VIP Tron Goi', 3000000.00),
+(N'Goi VVIP Kim Cuong', 6000000.00);
+
+-- Insert cho Members (5 ban ghi)
+INSERT INTO Members (FullName, PackageID, JoinDate) VALUES 
+(N'Cao Van Nam', 1, '2026-01-10'), 
+(N'Hoang Thuy Linh', 2, '2026-02-15'),
+(N'Do Minh Quan', 3, '2026-03-01'), 
+(N'Phan Thanh Thao', 4, '2026-03-12'),
+(N'Bui Tien Dung', 5, '2026-04-05');
+
+-- Insert cho Trainers (5 ban ghi)
+INSERT INTO Trainers (TrainerName, Email, ExperienceYears) VALUES 
+(N'HLV Nguyen Hoan', N'hoan.nguyen@gym.com', 5),
+(N'HLV Tran Thao', N'thao.tran@gym.com', 3),
+(N'HLV Le Hai', N'hai.le@gym.com', 7),
+(N'HLV Pham Huy', N'huy.pham@gym.com', 2),
+(N'HLV Vu Hoang', N'hoang.vu@gym.com', 4),
+(N'HLV Nguyen Manh', N'manh.nguyen@gym.com', 6);
+
+-- Insert cho Specializations (5 ban ghi)
+INSERT INTO Specializations (SpecName, Description) VALUES 
+(N'Giam can nhanh', N'Bai tap cuong do cao tieu hao calo'), 
+(N'Tang co bap', N'Tap ta va dinh duong the hinh chuyen sau'), 
+(N'Yoga va Thien', N'Can bang tam tri va nang cao do deo dai'), 
+(N'Boxing va Vo thuat', N'Tap luyen phan xa va tu ve'),
+(N'Phuc hoi chuc nang', N'Ho tro sau chan thuong xuong khop');
+
+-- Insert cho Bookings (5 ban ghi)
+INSERT INTO Bookings (TrainerID, BookingDate, SessionTime) VALUES 
+(1, '2026-06-25 08:00:00', '2026-06-26 09:00:00'),
+(2, '2026-06-25 09:30:00', '2026-06-26 14:00:00'),
+(3, '2026-06-26 10:00:00', '2026-06-27 16:30:00'),
+(4, '2026-06-26 15:00:00', '2026-06-27 08:00:00'),
+(5, '2026-06-27 11:15:00', '2026-06-28 19:00:00');
+
+-- Insert cho BookingDetails (5 ban ghi)
+INSERT INTO BookingDetails (BookingID, MemberID, DurationMinutes, Status) VALUES 
+(1, 1, 60, N'Da tap'), 
+(2, 2, 90, N'Da tap'), 
+(3, 3, 60, N'Cho mien'), 
+(4, 4, 45, N'Da huy'), 
+(5, 5, 120, N'Da tap');
+
+-- Insert cho TrainerSpecs (6 ban ghi - n-n)
+INSERT INTO TrainerSpecs (TrainerID, SpecID) VALUES 
+(1, 1), (1, 2), -- HLV Nguyen Manh: Giam can va Tang co
+(2, 3),         -- HLV Tran Thao: Chuyen Yoga
+(3, 2), (3, 4), -- HLV Le Hai: Tang co va Boxing
+(4, 1),         -- HLV Pham Huy: Giam can
+(5, 5);         -- HLV Vu Hoang: Phuc hoi

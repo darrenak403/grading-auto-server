@@ -2,90 +2,98 @@
 <!-- saved from url=(0022)http://localhost:5190/ -->
 <html><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
 
-</head><body><div class="cinema-wrap">
-    <h2 style="margin-top: 0; margin-bottom: 20px;">Cinema Ticket Booking Management</h2>
+</head><body><div class="gym-wrap">
+    <h2 style="margin-top: 0; margin-bottom: 20px;">Trainer Booking Directory</h2>
 
-    <!-- Form tìm kiếm nâng cao -->
-    <form method="get" action="http://localhost:5190/Ticket" class="filter-section">
+    <!-- Form tìm kiếm nâng cao phối hợp Dropdown và Ô nhập văn bản -->
+    <form method="get" action="http://localhost:5190/Trainer" class="filter-section">
         <div class="filter-item">
-            <label>Filter by Movie:</label>
-            <select name="movieId" id="sl_movies">
-                <option value="0" id="op_0">All movies</option>
-                        <option value="1" id="op_1">Lat Mat 7</option>
-                        <option value="2" id="op_2">Ngay Xua Co Mot Chuyen Tinh</option>
-                        <option value="3" id="op_3">Biet Doi Anh Hung</option>
-                        <option value="4" id="op_4">Tham Tu Conan</option>
-                        <option value="5" id="op_5">Quy Cau</option>
+            <label>Specialization:</label>
+            <select name="specId" id="sl_specializations">
+                <option value="0" id="op_0">All specializations</option>
+                        <option value="1" id="op_1">Giam can nhanh</option>
+                        <option value="2" id="op_2">Tang co bap</option>
+                        <option value="3" id="op_3">Yoga va Thien</option>
+                        <option value="4" id="op_4">Boxing va Vo thuat</option>
+                        <option value="5" id="op_5">Phuc hoi chuc nang</option>
             </select>
         </div>
 
         <div class="filter-item">
-            <label>Viewer Age Group:</label>
-            <select name="ageGroup" id="sl_ageGroup">
-                <option value="All viewers" selected="selected">All viewers</option>
-                <option value="Minor ( &lt; 18 )">Minor ( &lt; 18 )</option>
-                <option value="Adult ( &gt;= 18 )">Adult ( &gt;= 18 )</option>
-            </select>
+            <label>Trainer Name:</label>
+            <input type="text" name="trainerName" id="ip_trainerName" value="" placeholder="Enter trainer name...">
         </div>
 
         <button type="submit" id="bt_search" class="btn-submit">Search</button>
     </form>
 
-    <!-- Bảng hiển thị kết quả -->
-    <table class="ticket-table">
+    <!-- Bảng kết quả lọc danh sách -->
+    <table class="trainer-table">
         <thead>
             <tr>
-                <th style="width: 120px;">Ticket ID</th>
-                <th style="width: 250px;">Viewer Name</th>
-                <th style="width: 230px;">Booking Date</th>
-                <th style="width: 130px;">Viewer Age</th>
-                <th style="width: 120px;">Action</th>
+                <th style="width: 250px;">Trainer Name</th>
+                <th style="width: 250px;">Email</th>
+                <th style="width: 150px;">Experience Years</th>
+                <th style="width: 250px;">Specializations</th>
+                <th style="width: 150px;">Action</th>
             </tr>
         </thead>
         <tbody>
                 <tr>
-                    <td id="td_id_1">1</td>
-                    <td id="td_viewer_1">Tran Van Hung</td>
-                    <td id="td_bookingDate_1">2026-06-20 14:00</td>
-                    <td id="td_age_1">20</td>
+                    <td id="td_name_1">HLV Nguyen Manh</td>
+                    <td id="td_email_1">manh.nguyen@gym.com</td>
+                    <td id="td_exp_1">5</td>
                     <td>
-                        <a href="http://localhost:5190/Ticket/1" id="a_1" class="btn-action">View Details</a>
+                            <span id="span_Giam can nhanh_1" class="spec-badge">Giam can nhanh</span>
+                            <span id="span_Tang co bap_2" class="spec-badge">Tang co bap</span>
+                    </td>
+                    <td>
+                        <a href="http://localhost:5190/Trainer/Analyze/1" id="a_1" class="btn-action">Analyze Schedule</a>
                     </td>
                 </tr>
                 <tr>
-                    <td id="td_id_2">2</td>
-                    <td id="td_viewer_2">Nguyen Thi Mai</td>
-                    <td id="td_bookingDate_2">2026-06-20 15:30</td>
-                    <td id="td_age_2">17</td>
+                    <td id="td_name_2">HLV Tran Thao</td>
+                    <td id="td_email_2">thao.tran@gym.com</td>
+                    <td id="td_exp_2">3</td>
                     <td>
-                        <a href="http://localhost:5190/Ticket/2" id="a_2" class="btn-action">View Details</a>
+                            <span id="span_Yoga va Thien_3" class="spec-badge">Yoga va Thien</span>
+                    </td>
+                    <td>
+                        <a href="http://localhost:5190/Trainer/Analyze/2" id="a_2" class="btn-action">Analyze Schedule</a>
                     </td>
                 </tr>
                 <tr>
-                    <td id="td_id_3">3</td>
-                    <td id="td_viewer_3">Le Hoang Long</td>
-                    <td id="td_bookingDate_3">2026-06-21 09:00</td>
-                    <td id="td_age_3">25</td>
+                    <td id="td_name_3">HLV Le Hai</td>
+                    <td id="td_email_3">hai.le@gym.com</td>
+                    <td id="td_exp_3">7</td>
                     <td>
-                        <a href="http://localhost:5190/Ticket/3" id="a_3" class="btn-action">View Details</a>
+                            <span id="span_Tang co bap_2" class="spec-badge">Tang co bap</span>
+                            <span id="span_Boxing va Vo thuat_4" class="spec-badge">Boxing va Vo thuat</span>
+                    </td>
+                    <td>
+                        <a href="http://localhost:5190/Trainer/Analyze/3" id="a_3" class="btn-action">Analyze Schedule</a>
                     </td>
                 </tr>
                 <tr>
-                    <td id="td_id_4">4</td>
-                    <td id="td_viewer_4">Pham Hong Nhung</td>
-                    <td id="td_bookingDate_4">2026-06-21 10:15</td>
-                    <td id="td_age_4">15</td>
+                    <td id="td_name_4">HLV Pham Huy</td>
+                    <td id="td_email_4">huy.pham@gym.com</td>
+                    <td id="td_exp_4">2</td>
                     <td>
-                        <a href="http://localhost:5190/Ticket/4" id="a_4" class="btn-action">View Details</a>
+                            <span id="span_Giam can nhanh_1" class="spec-badge">Giam can nhanh</span>
+                    </td>
+                    <td>
+                        <a href="http://localhost:5190/Trainer/Analyze/4" id="a_4" class="btn-action">Analyze Schedule</a>
                     </td>
                 </tr>
                 <tr>
-                    <td id="td_id_5">5</td>
-                    <td id="td_viewer_5">Vu Minh Tri</td>
-                    <td id="td_bookingDate_5">2026-06-22 08:00</td>
-                    <td id="td_age_5">30</td>
+                    <td id="td_name_5">HLV Vu Hoang</td>
+                    <td id="td_email_5">hoang.vu@gym.com</td>
+                    <td id="td_exp_5">4</td>
                     <td>
-                        <a href="http://localhost:5190/Ticket/5" id="a_5" class="btn-action">View Details</a>
+                            <span id="span_Phuc hoi chuc nang_5" class="spec-badge">Phuc hoi chuc nang</span>
+                    </td>
+                    <td>
+                        <a href="http://localhost:5190/Trainer/Analyze/5" id="a_5" class="btn-action">Analyze Schedule</a>
                     </td>
                 </tr>
         </tbody>
