@@ -1,0 +1,96 @@
+[
+  {
+    "name": "TC01 - GET /api/MembershipPackages - danh sach goi tap mac dinh",
+    "httpMethod": "GET",
+    "urlTemplate": "/api/MembershipPackages",
+    "expectedStatus": 200,
+    "isArray": true,
+    "expectedBody": [
+      {"packageId": 1, "packageName": "Goi Thang Co Ban", "price": 300000, "memberCount": 1},
+      {"packageId": 2, "packageName": "Goi Binh Minh", "price": 450000, "memberCount": 1},
+      {"packageId": 3, "packageName": "Goi Chuyen Nghiep", "price": 800000, "memberCount": 1},
+      {"packageId": 4, "packageName": "Goi Gia Dinh", "price": 1500000, "memberCount": 1},
+      {"packageId": 5, "packageName": "Goi VIP Tron Goi", "price": 3000000, "memberCount": 1},
+      {"packageId": 6, "packageName": "Goi VVIP Kim Cuong", "price": 6000000, "memberCount": 0}
+    ],
+    "order": 1,
+    "score": 1
+  },
+  {
+    "name": "TC02 - GET /api/filter-members?packageId=1&minDuration=50 - loc hoi vien hop le",
+    "httpMethod": "GET",
+    "urlTemplate": "/api/filter-members",
+    "input": {"packageId": 1, "minDuration": 50},
+    "expectedStatus": 200,
+    "isArray": true,
+    "expectedBody": [
+      {
+        "memberId": 1,
+        "fullName": "Cao Van Nam",
+        "joinDate": "2026-01-10T00:00:00",
+        "packageName": "Goi Thang Co Ban",
+        "totalMinutesTrained": 60,
+        "lastTrainerName": "HLV Nguyen Hoan"
+      }
+    ],
+    "order": 2,
+    "score": 1
+  },
+  {
+    "name": "TC03 - GET /api/filter-members?packageId=1&minDuration=-50 - minDuration am -> 400 (\"minDuration cannot be negative\")",
+    "httpMethod": "GET",
+    "urlTemplate": "/api/filter-members",
+    "input": {"packageId": 1, "minDuration": -50},
+    "expectedStatus": 400,
+    "order": 3,
+    "score": 0.25
+  },
+  {
+    "name": "TC04 - POST /api/MembershipPackages - them moi goi tap thanh cong",
+    "httpMethod": "POST",
+    "urlTemplate": "/api/MembershipPackages",
+    "input": {"packageName": "New Pakage", "price": 10000},
+    "expectedStatus": 201,
+    "expectedBody": {
+      "packageId": 7,
+      "packageName": "New Pakage",
+      "price": 10000,
+      "members": []
+    },
+    "order": 4,
+    "score": 0.75
+  },
+  {
+    "name": "TC05 - POST /api/MembershipPackages - trung ten Goi Gia Dinh -> 400 (\"Membership package name already exists\")",
+    "httpMethod": "POST",
+    "urlTemplate": "/api/MembershipPackages",
+    "input": {"packageName": "Goi Gia Dinh", "price": 10000},
+    "expectedStatus": 400,
+    "order": 5,
+    "score": 0.5
+  },
+  {
+    "name": "TC06 - DELETE /api/MembershipPackages/6 - xoa goi VVIP Kim Cuong (khong co hoi vien)",
+    "httpMethod": "DELETE",
+    "urlTemplate": "/api/MembershipPackages/6",
+    "expectedStatus": 204,
+    "order": 6,
+    "score": 0.75
+  },
+  {
+    "name": "TC07 - DELETE /api/MembershipPackages/1 - goi dang co hoi vien su dung -> 400 (\"Cannot delete membership package with active registered members\")",
+    "httpMethod": "DELETE",
+    "urlTemplate": "/api/MembershipPackages/1",
+    "expectedStatus": 400,
+    "order": 7,
+    "score": 0.5
+  },
+  {
+    "name": "TC08 - DELETE /api/MembershipPackages/99 - khong ton tai -> 404",
+    "httpMethod": "DELETE",
+    "urlTemplate": "/api/MembershipPackages/99",
+    "expectedStatus": 404,
+    "order": 8,
+    "score": 0.25
+  }
+]
