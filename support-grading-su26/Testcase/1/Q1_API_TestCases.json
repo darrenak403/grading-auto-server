@@ -1,0 +1,107 @@
+[
+  {
+    "name": "TC01 - GET /api/Specializations - danh sach chuyen mon mac dinh",
+    "httpMethod": "GET",
+    "urlTemplate": "/api/Specializations",
+    "expectedStatus": 200,
+    "isArray": true,
+    "expectedBody": [
+      {"specId": 1, "specName": "Giam can nhanh", "description": "Bai tap cuong do cao tieu hao calo", "trainerCount": 2},
+      {"specId": 2, "specName": "Tang co bap", "description": "Tap ta va dinh duong the hinh chuyen sau", "trainerCount": 2},
+      {"specId": 3, "specName": "Yoga va Thien", "description": "Can bang tam tri va nang cao do deo dai", "trainerCount": 1},
+      {"specId": 4, "specName": "Boxing va Vo thuat", "description": "Tap luyen phan xa va tu ve", "trainerCount": 1},
+      {"specId": 5, "specName": "Phuc hoi chuc nang", "description": "Ho tro sau chan thuong xuong khop", "trainerCount": 1}
+    ],
+    "order": 1,
+    "score": 1
+  },
+  {
+    "name": "TC02 - GET /api/filter-trainers?specId=1&minExperience=2 - loc HLV hop le",
+    "httpMethod": "GET",
+    "urlTemplate": "/api/filter-trainers",
+    "input": {"specId": 1, "minExperience": 2},
+    "expectedStatus": 200,
+    "isArray": true,
+    "expectedBody": [
+      {
+        "trainerId": 1,
+        "trainerName": "HLV Nguyen Hoan",
+        "email": "hoan.nguyen@gym.com",
+        "experienceYears": 5,
+        "totalMinutesTrained": 60,
+        "lastBookedMember": "Cao Van Nam",
+        "specializationList": ["Giam can nhanh", "Tang co bap"]
+      },
+      {
+        "trainerId": 4,
+        "trainerName": "HLV Pham Huy",
+        "email": "huy.pham@gym.com",
+        "experienceYears": 2,
+        "totalMinutesTrained": 45,
+        "lastBookedMember": "Phan Thanh Thao",
+        "specializationList": ["Giam can nhanh"]
+      }
+    ],
+    "order": 2,
+    "score": 1
+  },
+  {
+    "name": "TC03 - GET /api/filter-trainers?specId=1&minExperience=-2 - minExperience am -> 400 (\"minExperience cannot be negative\")",
+    "httpMethod": "GET",
+    "urlTemplate": "/api/filter-trainers",
+    "input": {"specId": 1, "minExperience": -2},
+    "expectedStatus": 400,
+    "order": 3,
+    "score": 0.25
+  },
+  {
+    "name": "TC04 - POST /api/trainers - them moi HLV thanh cong",
+    "httpMethod": "POST",
+    "urlTemplate": "/api/trainers",
+    "input": {"trainerName": "HLV Moi", "email": "moi.moi@gym.com", "experienceYears": 2},
+    "expectedStatus": 201,
+    "expectedBody": {
+      "trainerId": 7,
+      "trainerName": "HLV Moi",
+      "email": "moi.moi@gym.com",
+      "experienceYears": 2,
+      "bookings": [],
+      "specs": []
+    },
+    "order": 4,
+    "score": 0.75
+  },
+  {
+    "name": "TC05 - POST /api/trainers - trung email hoan.nguyen@gym.com -> 400 (\"Trainer email already exists\")",
+    "httpMethod": "POST",
+    "urlTemplate": "/api/trainers",
+    "input": {"trainerName": "HLV Moi", "email": "hoan.nguyen@gym.com", "experienceYears": 2},
+    "expectedStatus": 400,
+    "order": 5,
+    "score": 0.5
+  },
+  {
+    "name": "TC06 - DELETE /api/trainers/6 - xoa HLV Nguyen Manh (khong co lich dat)",
+    "httpMethod": "DELETE",
+    "urlTemplate": "/api/trainers/6",
+    "expectedStatus": 204,
+    "order": 6,
+    "score": 0.75
+  },
+  {
+    "name": "TC07 - DELETE /api/trainers/1 - HLV dang co lich dat tap -> 400 (\"Cannot delete trainer with active booking records\")",
+    "httpMethod": "DELETE",
+    "urlTemplate": "/api/trainers/1",
+    "expectedStatus": 400,
+    "order": 7,
+    "score": 0.5
+  },
+  {
+    "name": "TC08 - DELETE /api/trainers/99 - khong ton tai -> 404",
+    "httpMethod": "DELETE",
+    "urlTemplate": "/api/trainers/99",
+    "expectedStatus": 404,
+    "order": 8,
+    "score": 0.25
+  }
+]
